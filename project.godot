@@ -1,0 +1,42 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="AETHERWING"
+config/description="Recursive Arcade Shooter — Godot port"
+run/main_scene="res://Main.tscn"
+config/features=PackedStringArray("4.6", "Mobile")
+boot_splash/show_image=false
+config/icon="res://icons/icon_512.png"
+
+[autoload]
+
+Data="*res://scripts/Data.gd"
+Audio="*res://scripts/Audio.gd"
+
+[display]
+
+window/size/viewport_width=720
+window/size/viewport_height=1280
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/handheld/orientation=1
+
+[input_devices]
+
+pointing/emulate_touch_from_mouse=true
+
+[rendering]
+
+renderer/rendering_method="mobile"
+renderer/rendering_method.mobile="mobile"
+environment/defaults/default_clear_color=Color(0.0196078, 0.0392157, 0.0784314, 1)
+textures/vram_compression/import_etc2_astc=true
