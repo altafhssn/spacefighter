@@ -194,12 +194,19 @@ func _show_splash() -> void:
 	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	tr.offset_left = 70; tr.offset_top = 70; tr.offset_right = -70; tr.offset_bottom = -70
 	tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tr.pivot_offset = (view_size - Vector2(140, 140)) * 0.5
 	root.add_child(tr)
 
-	root.modulate.a = 0.0
+	# Black covers instantly so the menu never shows through; only the logo
+	# animates, then the whole splash crossfades into the menu once.
+	root.modulate.a = 1.0
+	tr.modulate.a = 0.0
+	tr.scale = Vector2(0.94, 0.94)
 	var tw := create_tween()
-	tw.tween_property(root, "modulate:a", 1.0, 0.5)
-	tw.tween_interval(1.4)
+	tw.set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+	tw.parallel().tween_property(tr, "modulate:a", 1.0, 0.5)
+	tw.parallel().tween_property(tr, "scale", Vector2.ONE, 0.6)
+	tw.tween_interval(1.3)
 	tw.tween_property(root, "modulate:a", 0.0, 0.6)
 	tw.tween_callback(cl.queue_free)
 
