@@ -324,7 +324,7 @@ func update_landmarks(dt: float) -> void:
 		if lm.visited: continue
 		var d: float = lm.position.distance_to(p)
 		var def: Dictionary = Data.LANDMARK_TYPES[lm.type]
-		if lm.guarded and not lm.guard_triggered and world_boss == null:
+		if lm.guarded and not lm.guard_triggered and world_boss == null and boss == null:
 			if d < 200.0:
 				lm.guard_triggered = true
 				var ang: float = (lm.position - p).angle()
@@ -685,7 +685,7 @@ func update(raw_dt: float) -> void:
 
 	# boss every 60s
 	boss_timer += raw_dt
-	if boss_timer >= Data.BOSS_INTERVAL and boss == null and wave_spawn_queue.is_empty():
+	if boss_timer >= Data.BOSS_INTERVAL and boss == null and world_boss == null and wave_spawn_queue.is_empty():
 		boss_timer = 0.0
 		_spawn_timed_boss()
 
