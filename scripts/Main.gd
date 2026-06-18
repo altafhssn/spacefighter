@@ -156,6 +156,52 @@ func _ready() -> void:
 	new_game()
 	state = "start"
 	hud.show_start()
+	_show_splash()
+
+# --- Studio boot splash (LITTLE TAG ART STUDIOS) ---
+# Shows the studio logo on launch, then fades into the menu.
+# Skips silently if the logo file hasn't been added yet.
+func _show_splash() -> void:
+	var candidates := [
+		"res://assets/LTAS.png",
+		"res://assets/littletag_logo.png",
+		"res://assets/logo.png",
+		"res://assets/littletag.png",
+	]
+	var tex: Texture2D = null
+	for c in candidates:
+		if ResourceLoader.exists(c):
+			tex = load(c)
+			if tex != null:
+				break
+	if tex == null:
+		return
+
+	var cl := CanvasLayer.new()
+	cl.layer = 100
+	add_child(cl)
+	var root := Control.new()
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	cl.add_child(root)
+	var bg := ColorRect.new()
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.color = Color.BLACK
+	root.add_child(bg)
+	var tr := TextureRect.new()
+	tr.texture = tex
+	tr.set_anchors_preset(Control.PRESET_FULL_RECT)
+	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	tr.offset_left = 70; tr.offset_top = 70; tr.offset_right = -70; tr.offset_bottom = -70
+	tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(tr)
+
+	root.modulate.a = 0.0
+	var tw := create_tween()
+	tw.tween_property(root, "modulate:a", 1.0, 0.5)
+	tw.tween_interval(1.4)
+	tw.tween_property(root, "modulate:a", 0.0, 0.6)
+	tw.tween_callback(cl.queue_free)
 
 const SAVE_PATH := "user://aetherwing.save"
 func _load_high_score() -> int:
