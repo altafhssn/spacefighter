@@ -69,7 +69,7 @@ const CULL_DISTANCE := 1400.0
 const SPAWN_RING_MIN := 0.55
 const SPAWN_RING_MAX := 0.75
 const ELITE_INTERVAL := 30.0
-const BOSS_INTERVAL := 60.0
+const BOSS_INTERVAL := 90.0
 
 func scale_enemy_hp(base: float, wave: int) -> float:
 	return round(base * (1.0 + wave * 0.15))
