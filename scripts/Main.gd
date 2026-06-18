@@ -381,6 +381,7 @@ func get_active_landmarks() -> Array:
 # WORLD MINI-BOSS
 # ------------------------------------------------------------
 func spawn_world_boss(type: String, pos: Vector2, landmark_key: String) -> void:
+	boss_timer = 0.0
 	var def: Dictionary = Data.MINI_BOSS_TYPES[type]
 	var scaled: float = round(def.hp * (1.0 + wave * 0.2))
 	var b := WorldBoss.new()
@@ -434,6 +435,7 @@ func defeat_world_boss() -> void:
 	hud.hide_world_boss_bar()
 	b.queue_free()
 	world_boss = null
+	boss_timer = 0.0   # full 60s breather before the next timed boss
 
 # ------------------------------------------------------------
 # GAME LIFECYCLE
@@ -1298,6 +1300,7 @@ func _spawn_timed_boss() -> void:
 	else: spawn_spiral()
 
 func spawn_conductor() -> void:
+	boss_timer = 0.0
 	boss = Boss.new()
 	boss.main = self
 	boss.setup_conductor()
@@ -1310,6 +1313,7 @@ func spawn_conductor() -> void:
 	Audio.boss_warn()
 
 func spawn_spiral() -> void:
+	boss_timer = 0.0
 	boss = Boss.new()
 	boss.main = self
 	boss.setup_spiral()
@@ -1340,6 +1344,7 @@ func damage_boss(amount: float) -> void:
 		hud.hide_boss_bar()
 		boss.queue_free()
 		boss = null
+		boss_timer = 0.0   # full 60s breather before the next timed boss
 		# Wave advancement is handled by the single wave-transition path in update()
 		# once the arena clears — avoids the boss death double-advancing the wave.
 
