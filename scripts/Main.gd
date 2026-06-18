@@ -54,6 +54,7 @@ var high_score := 0
 
 var upgrades := {}
 var upgrade_stacks := {}
+var pending_level_ups := 0
 
 # --- landmarks / world mini-boss ---
 var landmark_cache := {}          # "cx,cy" -> Landmark node or null
@@ -290,11 +291,15 @@ func apply_landmark_effect(lm) -> void:
 	match lm.type:
 		"cache":
 			var num := 2 if current_modifier == "cache" else 1
+			var granted := 0
 			for i in num:
-				var up: Dictionary = Data.UPGRADES[randi() % Data.UPGRADES.size()]
-				_apply_upgrade(up.id)
-				upgrade_stacks[up.id] = upgrade_stacks.get(up.id, 0) + 1
-			hud.toast("%d UPGRADE(S) ACQUIRED" % num, "gold")
+				var available := Data.UPGRADES.filter(func(up): return _is_upgrade_available(up.id))
+				if available.is_empty():
+					break
+				var up: Dictionary = available[randi() % available.size()]
+				if _grant_upgrade(up.id):
+					granted += 1
+			hud.toast("%d UPGRADE(S) ACQUIRED" % granted, "gold")
 		"station":
 			player.hp = player.max_hp
 			player.echo_meter = Data.ECHO.meter_max
@@ -356,11 +361,13 @@ func defeat_world_boss() -> void:
 	spawn_particles(b.position, Data.AMBER, 30, 6.0)
 	spawn_particles(b.position, Data.WHITE, 20, 4.0)
 	spawn_decal(b.position, 30.0, b.color)
-	score += b.score_value
-	spawn_xp_gem(b.position, b.xp_value)
-	spawn_xp_gem(b.position + Vector2(20, 10), b.xp_value)
-	spawn_xp_gem(b.position + Vector2(-20, -10), b.xp_value)
-	hud.toast("%s DEFEATED — +%d" % [b.boss_name, b.score_value], "gold")
+	var guardian_gain := int(round(b.score_value * active_score_mult()))
+	score += guardian_gain
+	var guardian_xp := int(round(b.xp_value * enemy_xp_mult()))
+	spawn_xp_gem(b.position, guardian_xp)
+	spawn_xp_gem(b.position + Vector2(20, 10), guardian_xp)
+	spawn_xp_gem(b.position + Vector2(-20, -10), guardian_xp)
+	hud.toast("%s DEFEATED — +%d" % [b.boss_name, guardian_gain], "gold")
 	Audio.boss_kill()
 	screen_shake = 1.0
 	hit_pause = 0.15
@@ -413,6 +420,7 @@ func new_game() -> void:
 		"echoDuration": 0.0, "lifesteal": 0.0, "effBoost": 0.0, "overdrive": 0.0,
 	}
 	upgrade_stacks = {}
+	pending_level_ups = 0
 
 	player = PlayerScript.new()
 	player.position = Vector2.ZERO
@@ -456,13 +464,23 @@ func gain_xp(amount: int) -> void:
 		xp_current -= xp_to_next
 		xp_level += 1
 		xp_to_next = Data.xp_required(xp_level)
+		pending_level_ups += 1
+	if pending_level_ups > 0 and state != "levelup":
 		trigger_level_up()
 	hud.update_xp()
 
 func trigger_level_up() -> void:
+	if pending_level_ups <= 0:
+		return
+	pending_level_ups -= 1
 	state = "levelup"
 	time_scale = 0.0
-	var pool: Array = Data.UPGRADES.duplicate()
+	var pool: Array = Data.UPGRADES.filter(func(up): return _is_upgrade_available(up.id))
+	if pool.is_empty():
+		pending_level_ups = 0
+		state = "playing"
+		time_scale = 1.0
+		return
 	var choices: Array = []
 	for i in 3:
 		if pool.is_empty(): break
@@ -481,32 +499,44 @@ func trigger_level_up() -> void:
 	hud.toast("LEVEL %d!" % xp_level, "gold")
 
 func choose_upgrade(up: Dictionary) -> void:
-	_apply_upgrade(up.id)
-	upgrade_stacks[up.id] = upgrade_stacks.get(up.id, 0) + 1
+	_grant_upgrade(up.id)
 	hud.hide_levelup()
-	state = "playing"
-	time_scale = 1.0
 	hud.toast(up.name + " ACQUIRED", "green")
+	if pending_level_ups > 0:
+		trigger_level_up()
+	else:
+		state = "playing"
+		time_scale = 1.0
+
+func _is_upgrade_available(id: String) -> bool:
+	return upgrade_stacks.get(id, 0) < Data.UPGRADE_MAX_STACKS.get(id, 1)
+
+func _grant_upgrade(id: String) -> bool:
+	if not _is_upgrade_available(id):
+		return false
+	_apply_upgrade(id)
+	upgrade_stacks[id] = upgrade_stacks.get(id, 0) + 1
+	return true
 
 func _apply_upgrade(id: String) -> void:
 	match id:
-		"damage": upgrades.damage += 0.25
-		"firerate": upgrades.fireRate += 0.20
-		"multishot": upgrades.multishot += 1
-		"pierce": upgrades.pierce += 1
-		"bulletspeed": upgrades.bulletSpeed += 0.30
+		"damage": upgrades.damage = min(2.0, upgrades.damage + 0.25)
+		"firerate": upgrades.fireRate = min(1.0, upgrades.fireRate + 0.20)
+		"multishot": upgrades.multishot = min(4, upgrades.multishot + 1)
+		"pierce": upgrades.pierce = min(5, upgrades.pierce + 1)
+		"bulletspeed": upgrades.bulletSpeed = min(1.2, upgrades.bulletSpeed + 0.30)
 		"maxhp":
 			player.max_hp += 1; player.hp = player.max_hp
-		"dashcd": upgrades.dashCd -= 0.25
-		"echogain": upgrades.echoGain += 0.50
-		"critchance": upgrades.critChance += 0.15
-		"magnet": upgrades.magnet += 0.40
-		"movespeed": upgrades.moveSpeed += 0.15
+		"dashcd": upgrades.dashCd = max(-0.75, upgrades.dashCd - 0.25)
+		"echogain": upgrades.echoGain = min(2.0, upgrades.echoGain + 0.50)
+		"critchance": upgrades.critChance = min(0.60, upgrades.critChance + 0.15)
+		"magnet": upgrades.magnet = min(1.6, upgrades.magnet + 0.40)
+		"movespeed": upgrades.moveSpeed = min(0.60, upgrades.moveSpeed + 0.15)
 		"rewind": player.rewind_charges += 1
-		"echoduration": upgrades.echoDuration += 1.5
-		"lifesteal": upgrades.lifesteal += 0.05
-		"effboost": upgrades.effBoost += 0.20
-		"overdrive": upgrades.overdrive += 0.30
+		"echoduration": upgrades.echoDuration = min(4.5, upgrades.echoDuration + 1.5)
+		"lifesteal": upgrades.lifesteal = min(0.20, upgrades.lifesteal + 0.05)
+		"effboost": upgrades.effBoost = min(0.80, upgrades.effBoost + 0.20)
+		"overdrive": upgrades.overdrive = min(0.90, upgrades.overdrive + 0.30)
 
 # ------------------------------------------------------------
 # MAIN LOOP
@@ -744,11 +774,12 @@ func fire_bullet(ang: float, w: Dictionary) -> Bullet:
 	var dmg_mult: float = 1.0 + upgrades.damage
 	var spd_mult: float = 1.0 + upgrades.bulletSpeed
 	var b := Bullet.new()
+	b.is_critical = randf() < clampf(upgrades.critChance, 0.0, 0.60)
 	b.friendly = true
 	b.position = player.position + Vector2(0, -Data.PLAYER.size)
 	b.vel = Vector2(cos(ang), sin(ang)) * w.bullet_speed * spd_mult
 	b.size = w.bullet_size
-	b.damage = w.damage * dmg_mult
+	b.damage = w.damage * dmg_mult * (3.0 if b.is_critical else 1.0)
 	b.color = w.color
 	b.life = 1.2 if w.behavior == "pierce" else 2.0
 	b.is_beam = (w.behavior == "pierce")
@@ -776,7 +807,7 @@ func _update_bullets(dt: float) -> void:
 					e.position += pull * force * dt
 					e.hp -= b.damage * dt * 0.5
 					e.hit_flash = 0.05
-					if e.hp <= 0: kill_enemy(e)
+					if e.hp <= 0: kill_enemy(e, b.is_critical)
 			for eb in enemy_bullets:
 				var ed: float = eb.position.distance_to(b.position)
 				if ed < b.singularity_radius and ed > 5:
@@ -815,23 +846,33 @@ func _update_enemy_bullets(dt: float) -> void:
 func check_collisions() -> void:
 	var p := player
 	for b in bullets:
-		if b.hit: continue
+		if b.hit or b.singularity_activated: continue
 		# boss
-		if boss and boss.phase > 0:
+		if boss and boss.phase > 0 and not b.pierce_hits.has(boss):
 			if b.position.distance_to(boss.position) < boss.size + b.size:
 				damage_boss(b.damage)
-				if b.pierce > 0: b.pierce -= 1
-				else: b.hit = true
+				if b.is_singularity:
+					_activate_singularity(b)
+				elif b.pierce > 0:
+					b.pierce -= 1
+					b.pierce_hits.append(boss)
+				else:
+					b.hit = true
 				spawn_particles(b.position, Data.AMBER, 5, 2.0)
-				if b.hit: continue
+				if b.hit or b.singularity_activated: continue
 		# world mini-boss
-		if world_boss:
+		if world_boss and not b.pierce_hits.has(world_boss):
 			if b.position.distance_to(world_boss.position) < world_boss.size + b.size:
 				damage_world_boss(b.damage)
-				if b.pierce > 0: b.pierce -= 1
-				else: b.hit = true
+				if b.is_singularity:
+					_activate_singularity(b)
+				elif b.pierce > 0:
+					b.pierce -= 1
+					b.pierce_hits.append(world_boss)
+				else:
+					b.hit = true
 				spawn_particles(b.position, world_boss.color, 5, 2.0)
-				if b.hit: continue
+				if b.hit or b.singularity_activated: continue
 		# enemies
 		for e in enemies:
 			if e.remove or b.pierce_hits.has(e): continue
@@ -850,20 +891,18 @@ func check_collisions() -> void:
 				e.hp -= b.damage * dmg_mult
 				e.hit_flash = 0.1
 				if b.is_singularity and not b.singularity_activated:
-					b.singularity_activated = true
-					b.vel = Vector2.ZERO
-					b.life = b.singularity_duration + 0.1
-					spawn_particles(b.position, Data.PURPLE, 30, 6.0)
-					hud.toast("SINGULARITY ACTIVE", "green")
+					_activate_singularity(b)
 				elif b.pierce > 0:
 					b.pierce -= 1; b.pierce_hits.append(e)
 				else:
 					b.hit = true
 				spawn_particles(b.position, e.color, 5, 2.0)
-				spawn_damage_number(b.position, str(int(b.damage)), Data.AMBER, false)
+				var shown_damage := int(round(b.damage * dmg_mult))
+				var damage_text := "CRIT %d" % shown_damage if b.is_critical else str(shown_damage)
+				spawn_damage_number(b.position, damage_text, Data.AMBER, b.is_critical)
 				Audio.hit()
-				if e.hp <= 0: kill_enemy(e)
-				if b.hit: break
+				if e.hp <= 0: kill_enemy(e, b.is_critical)
+				if b.hit or b.singularity_activated: break
 
 	# player hit
 	if p.invuln <= 0 and not rewind_active:
@@ -904,13 +943,20 @@ func check_collisions() -> void:
 # ------------------------------------------------------------
 # KILL / DAMAGE
 # ------------------------------------------------------------
-func kill_enemy(e: Enemy) -> void:
+func _activate_singularity(b: Bullet) -> void:
+	b.singularity_activated = true
+	b.vel = Vector2.ZERO
+	b.life = b.singularity_duration + 0.1
+	spawn_particles(b.position, Data.PURPLE, 30, 6.0)
+	hud.toast("SINGULARITY ACTIVE", "green")
+
+func active_score_mult() -> float:
+	return score_mult() * (2.0 if echo_phase else 1.0)
+
+func kill_enemy(e: Enemy, is_crit := false) -> void:
 	if e.remove: return
 	e.remove = true
-	var crit_chance: float = upgrades.critChance
 	kill_count += 1
-	var is_crit := randf() < crit_chance or kill_count % 10 == 0
-	var crit_mult := 3 if is_crit else 1
 	spawn_particles(e.position, e.color, 18, 3.0)
 	spawn_particles(e.position, Data.WHITE, 8, 2.0)
 	if is_crit:
@@ -920,7 +966,7 @@ func kill_enemy(e: Enemy) -> void:
 		spawn_particles(e.position, Data.AMBER, 30, 6.0)
 		spawn_particles(e.position, Data.MAGENTA, 20, 8.0)
 	spawn_decal(e.position, 12.0, e.color)
-	var gain := int(round(e.score_value * combo * crit_mult * score_mult()))
+	var gain := int(round(e.score_value * combo * active_score_mult()))
 	score += gain
 	combo += 1
 	if combo > max_combo: max_combo = combo
@@ -931,7 +977,8 @@ func kill_enemy(e: Enemy) -> void:
 	Audio.kill()
 	hit_pause = max(hit_pause, 0.08 if is_crit else 0.04)
 	zoom_pulse = max(zoom_pulse, 1.04 if is_crit else 1.025)
-	spawn_xp_gem(e.position, int(round(e.xp_value * enemy_xp_mult())))
+	var elite_xp_mult := 2.0 if current_modifier == "hunt" and e.is_elite else 1.0
+	spawn_xp_gem(e.position, int(round(e.xp_value * enemy_xp_mult() * elite_xp_mult)))
 	if upgrades.lifesteal > 0 and randf() < upgrades.lifesteal:
 		if player.hp < player.max_hp:
 			player.hp += 1
@@ -1230,11 +1277,12 @@ func damage_boss(amount: float) -> void:
 		spawn_particles(boss.position, Data.MAGENTA, 50, 10.0)
 		spawn_particles(boss.position, Data.WHITE, 30, 6.0)
 		spawn_decal(boss.position, 40.0, Data.AMBER)
-		score += 6000
+		var boss_gain := int(round(6000 * active_score_mult()))
+		score += boss_gain
 		screen_shake = 1.5
 		hit_pause = 0.2
 		zoom_pulse = 1.08
-		hud.toast("BOSS DEFEATED — +6000", "gold")
+		hud.toast("BOSS DEFEATED — +%d" % boss_gain, "gold")
 		Audio.boss_kill()
 		hud.hide_boss_bar()
 		boss.queue_free()
@@ -1337,7 +1385,7 @@ func get_boost_mult() -> float:
 
 func update_boost(raw_dt: float) -> void:
 	if boost_active and player.echo_meter > 0:
-		var drain: float = Data.BOOST.drain_rate * (1.0 - upgrades.effBoost) * boost_drain_mult()
+		var drain: float = Data.BOOST.drain_rate * max(0.20, 1.0 - upgrades.effBoost) * boost_drain_mult()
 		player.echo_meter = max(0.0, player.echo_meter - drain * raw_dt)
 		if randf() < 0.5:
 			spawn_particles(player.position, Data.CYAN, 1, 2.0)
@@ -1367,7 +1415,7 @@ func trigger_dash() -> void:
 	if dir.length() < 0.1: dir = Vector2(0, -1)
 	dir = dir.normalized()
 	p.dash_timer = Data.PLAYER.dash_duration
-	p.dash_cooldown = Data.PLAYER.dash_cooldown * (1.0 + upgrades.dashCd)
+	p.dash_cooldown = Data.PLAYER.dash_cooldown * max(0.25, 1.0 + upgrades.dashCd)
 	p.invuln = max(p.invuln, Data.PLAYER.iframe_duration)
 	p.dash_dir = dir
 	Audio.dash()

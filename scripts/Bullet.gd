@@ -11,6 +11,7 @@ var damage := 6.0
 var life := 2.0
 var hit := false
 var is_beam := false
+var is_critical := false
 var trail: Array = []   # world-space Vector2
 
 # pierce

@@ -122,6 +122,25 @@ const UPGRADES := [
 	{"id": "overdrive",   "icon": "⚡", "name": "OVERDRIVE",      "desc": "+30% boost speed",              "rarity": "rare"},
 ]
 
+const UPGRADE_MAX_STACKS := {
+	"damage": 8,
+	"firerate": 5,
+	"multishot": 4,
+	"pierce": 5,
+	"bulletspeed": 4,
+	"maxhp": 5,
+	"dashcd": 3,
+	"echogain": 4,
+	"critchance": 4,
+	"magnet": 4,
+	"movespeed": 4,
+	"rewind": 3,
+	"echoduration": 3,
+	"lifesteal": 4,
+	"effboost": 4,
+	"overdrive": 3,
+}
+
 # ------------------------------------------------------------
 # WORLD LANDMARKS + MINI-BOSSES
 # ------------------------------------------------------------
@@ -149,7 +168,8 @@ const BOOST := {
 
 # XP curve
 func xp_required(level: int) -> int:
-	return int(floor(10.0 * pow(1.5, level - 1)))
+	var n: int = maxi(0, level - 1)
+	return 10 + n * 4 + int(floor(pow(n, 1.35) * 1.5))
 
 # ------------------------------------------------------------
 # DAILY + WEEKLY MODIFIERS

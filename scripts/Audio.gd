@@ -147,6 +147,7 @@ func wave_start() -> void:
 func boss_warn() -> void:
 	for i in 3: _tone_d(165, 0.15, "sawtooth", 0.08, 0, i * 0.25)
 func boss_hit() -> void: _play_buf(_tone(180, 0.06, "square", 0.05, 60))
+func boss_shoot() -> void: _play_buf(_tone(150, 0.08, "sawtooth", 0.05, -50))
 func boss_kill() -> void:
 	_play_buf(_tone(440, 0.15, "triangle", 0.1, 0)); _tone_d(554, 0.15, "triangle", 0.1, 0, 0.1); _tone_d(659, 0.3, "triangle", 0.1, 0, 0.2)
 func pickup() -> void:
