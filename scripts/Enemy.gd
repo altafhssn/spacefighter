@@ -29,6 +29,8 @@ var aim_time := 0.9
 var dive_speed := 400.0
 var shield_hp := 0.0
 var shield_angle := -PI / 2
+var shield_open := false
+var shield_cycle := 0.0
 var beam_telegraph := 1.2
 var fire_interval := 2.5
 var spiral_ang := 0.0
@@ -63,6 +65,8 @@ func update(dt: float) -> void:
 					remove = true
 		"shield":
 			var ang := (p - position).angle()
+			shield_cycle += dt
+			shield_open = fmod(shield_cycle, 4.0) >= 2.6
 			shield_angle = ang
 			vel = Vector2(cos(ang), sin(ang)) * speed
 		"snipe":
@@ -99,11 +103,40 @@ func update(dt: float) -> void:
 			queue_redraw()
 			return
 
+	# separation — push apart from nearby pursuers so swarms don't stack
+	if behavior == "drift" or behavior == "shield":
+		var sep := Vector2.ZERO
+		for o in main.enemies:
+			if o == self: continue
+			var off: Vector2 = position - o.position
+			var dsq := off.length_squared()
+			var rad: float = (size + o.size) * 1.5
+			if dsq > 0.01 and dsq < rad * rad:
+				sep += off / sqrt(dsq)
+		if sep != Vector2.ZERO:
+			vel += sep.normalized() * speed * 0.85
+
 	position += vel * dt
-	if behavior != "dive" and behavior != "spiral_out":
-		if position.distance_to(p) > Data.CULL_DISTANCE:
-			remove = true
+
+	# Pursuers never vanish from distance — if the player outruns them they
+	# re-enter from the spawn ring so the wave stays a threat.
+	var dp := position.distance_to(p)
+	var leash: float = main.view_size.length() * 0.9
+	match behavior:
+		"drift", "shield", "snipe":
+			if dp > leash: _reengage(p)
+		"dive":
+			if state == "aiming" and dp > leash: _reengage(p)
+			elif state == "diving" and dp > Data.CULL_DISTANCE: remove = true
 	queue_redraw()
+
+func _reengage(p: Vector2) -> void:
+	var ang := randf() * TAU
+	position = p + Vector2(cos(ang), sin(ang)) * main.view_size.length() * 0.62
+	if behavior == "snipe":
+		state = "positioning"; fire_timer = 0.0; telegraph = 0.0
+	elif behavior == "dive":
+		state = "aiming"; aim_time = 0.9; telegraph = 0.0
 
 func _fire_beam() -> void:
 	var p: Vector2 = main.player.position
@@ -144,8 +177,11 @@ func _draw() -> void:
 			draw_rect(Rect2(-size, -size, size * 2, size * 2), color, false, 1.5)
 			draw_rect(Rect2(-2, -size + 3, 4, size * 2 - 6), Data.NAVY)
 			draw_rect(Rect2(-size + 3, -2, size * 2 - 6, 4), Data.NAVY)
-			if shield_hp > 0:
+			if shield_hp > 0 and not shield_open:
 				draw_arc(Vector2.ZERO, size + 8.0, shield_angle - PI / 2, shield_angle + PI / 2, 20, Data.AMBER, 3.0)
+			elif shield_hp > 0 and shield_open:
+				# retracted — faint hint showing the body is exposed
+				draw_arc(Vector2.ZERO, size + 8.0, shield_angle - PI / 2, shield_angle + PI / 2, 20, Color(Data.AMBER.r, Data.AMBER.g, Data.AMBER.b, 0.18), 1.0)
 		"lancer":
 			var pts := PackedVector2Array([
 				Vector2(0, -size), Vector2(size * 0.55, 0),

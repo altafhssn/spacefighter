@@ -83,6 +83,14 @@ func _orbit(dt: float, orbit_speed: float, rx: float, ry: float, resp: float) ->
 func _aim() -> float:
 	return (main.player.position - position).angle()
 
+# partial target-leading so a player strafing at full speed isn't a free dodge
+func _aim_lead(bspeed: float) -> float:
+	var pp: Vector2 = main.player.position
+	var pv: Vector2 = main.player.vel
+	var t: float = (pp - position).length() / max(bspeed, 1.0)
+	var future: Vector2 = pp + pv * t * 0.6
+	return (future - position).angle()
+
 
 # ============================================================
 # CONDUCTOR
@@ -211,7 +219,7 @@ func _begin_attack(name: String) -> void:
 					_emit_from(b.pos, base + k * 0.16, 230.0, Data.MAGENTA, 5.0)
 		"aimed_burst":
 			Audio.boss_shoot()
-			var a := _aim()
+			var a := _aim_lead(340.0)
 			for k in range(-2, 3):
 				_emit(a + k * 0.13, 340.0, Data.MAGENTA, 6.0)
 		# ---- sweep attacks (fired over time during "fire") ----
@@ -255,7 +263,7 @@ func _sweep_volley(name: String) -> void:
 			sweep_ang += 0.16
 			# occasional aimed dagger to punish camping
 			if sweep_left % 2 == 0:
-				_emit(_aim(), 360.0, Data.MAGENTA, 6.0)
+				_emit(_aim_lead(360.0), 360.0, Data.MAGENTA, 6.0)
 
 func _emit(angle: float, speed: float, color: Color, bsize: float) -> void:
 	main.spawn_enemy_bullet(position, Vector2(cos(angle), sin(angle)) * speed, bsize, color, 1, 4.0)

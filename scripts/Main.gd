@@ -55,6 +55,15 @@ var high_score := 0
 var upgrades := {}
 var upgrade_stacks := {}
 var pending_level_ups := 0
+var _pending := false   # true while a warning banner is playing before a spawn
+
+func _announce_then(text: String, color: Color, cb: Callable) -> void:
+	_pending = true
+	hud.announce(text, color)
+	await get_tree().create_timer(1.3).timeout
+	_pending = false
+	if state == "playing":
+		cb.call()
 
 # --- landmarks / world mini-boss ---
 var landmark_cache := {}          # "cx,cy" -> Landmark node or null
@@ -324,14 +333,21 @@ func update_landmarks(dt: float) -> void:
 		if lm.visited: continue
 		var d: float = lm.position.distance_to(p)
 		var def: Dictionary = Data.LANDMARK_TYPES[lm.type]
-		if lm.guarded and not lm.guard_triggered and world_boss == null and boss == null:
-			if d < 200.0:
+		if lm.guarded and not lm.guard_triggered and world_boss == null and boss == null and not _pending:
+			if d < 220.0:
 				lm.guard_triggered = true
 				var ang: float = (lm.position - p).angle()
-				spawn_world_boss(lm.guard_type, lm.position - Vector2(cos(ang), sin(ang)) * 120.0, lm.key)
+				var bpos: Vector2 = lm.position - Vector2(cos(ang), sin(ang)) * 120.0
+				var gtype: String = lm.guard_type
+				var gkey: String = lm.key
+				var gdef: Dictionary = Data.MINI_BOSS_TYPES[gtype]
+				_announce_then("⚠ " + gdef.name + " AWAKENS", gdef.color, func(): spawn_world_boss(gtype, bpos, gkey))
 		if d < def.radius + Data.PLAYER.size:
-			if lm.guarded and world_boss and world_boss.guarding_landmark == lm.key:
-				hud.toast("DEFEAT THE GUARDIAN", "warning")
+			# a guarded landmark stays locked until its guardian is defeated
+			# (defeat clears `guarded`), so it can't be grabbed during the warning
+			if lm.guarded:
+				if lm.guard_triggered:
+					hud.toast("DEFEAT THE GUARDIAN", "warning")
 				continue
 			lm.visited = true
 			apply_landmark_effect(lm)
@@ -649,8 +665,8 @@ func update(raw_dt: float) -> void:
 		var s = wave_spawn_queue.pop_front()
 		spawn_enemy(s.type, s.pos)
 
-	# wave transition
-	if wave_spawn_queue.is_empty() and enemies.is_empty() and boss == null:
+	# wave transition (paused while a warning banner is announcing a spawn)
+	if wave_spawn_queue.is_empty() and enemies.is_empty() and boss == null and not _pending:
 		if wave_transition < 0:
 			wave_transition = 1.8
 		else:
@@ -659,8 +675,7 @@ func update(raw_dt: float) -> void:
 				wave_transition = -1.0
 				start_wave(wave + 1)
 	else:
-		if not (wave_spawn_queue.is_empty() and enemies.is_empty() and boss == null):
-			wave_transition = -1.0
+		wave_transition = -1.0
 
 	# entities
 	for e in enemies: e.update(dt)
@@ -681,15 +696,17 @@ func update(raw_dt: float) -> void:
 	# elites every 30s
 	elite_timer += raw_dt
 	var elite_interval: float = Data.ELITE_INTERVAL / 2.0 if current_modifier == "hunt" else Data.ELITE_INTERVAL
-	if elite_timer >= elite_interval and boss == null:
+	if elite_timer >= elite_interval and boss == null and world_boss == null and not _pending:
 		elite_timer = 0.0
-		spawn_elite()
+		_announce_then("⚠ ELITE INCOMING", Data.AMBER, func(): spawn_elite())
 
 	# boss every 60s
 	boss_timer += raw_dt
-	if boss_timer >= Data.BOSS_INTERVAL and boss == null and world_boss == null and wave_spawn_queue.is_empty():
+	if boss_timer >= Data.BOSS_INTERVAL and boss == null and world_boss == null and wave_spawn_queue.is_empty() and not _pending:
 		boss_timer = 0.0
-		_spawn_timed_boss()
+		var bn := wave / 5 + 1
+		var bname := "THE CONDUCTOR" if (bn - 1) % 2 == 0 else "THE SPIRAL"
+		_announce_then("⚠ WARNING\n" + bname, Data.MAGENTA, func(): _spawn_timed_boss())
 
 	if screen_shake > 0:
 		screen_shake = max(0.0, screen_shake - raw_dt * 2.0)
@@ -700,10 +717,12 @@ func update(raw_dt: float) -> void:
 		take_snapshot()
 		snap_timer = 0.1
 
-func _cull(arr: Array, pp: Vector2) -> void:
+func _cull(arr: Array, _pp: Vector2) -> void:
+	# Enemies are NOT removed by distance anymore (they re-engage from the spawn
+	# ring instead of vanishing). Only sweep out ones flagged for removal.
 	var keep: Array = []
 	for e in arr:
-		if e.remove or e.position.distance_to(pp) > Data.CULL_DISTANCE:
+		if e.remove:
 			e.queue_free()
 		else:
 			keep.append(e)
@@ -932,7 +951,7 @@ func check_collisions() -> void:
 		for e in enemies:
 			if e.remove or b.pierce_hits.has(e): continue
 			if b.position.distance_to(e.position) < e.size + b.size:
-				if e.behavior == "shield" and e.shield_hp > 0:
+				if e.behavior == "shield" and e.shield_hp > 0 and not e.shield_open:
 					var ang_to: float = (b.position - e.position).angle()
 					var ad := wrapf(ang_to - e.shield_angle, -PI, PI)
 					if abs(ad) < PI / 2:
@@ -1149,8 +1168,8 @@ func start_wave(n: int) -> void:
 	if n % 5 == 0:
 		var boss_num := n / 5
 		boss_index = (boss_num - 1) % 2
-		if boss_index == 0: spawn_conductor()
-		else: spawn_spiral()
+		var bname := "THE CONDUCTOR" if boss_index == 0 else "THE SPIRAL"
+		_announce_then("⚠ WARNING\n" + bname, Data.MAGENTA, _spawn_boss_idx.bind(boss_index))
 		return
 	var patterns := generate_wave_pattern(n)
 	var t := 0.0
@@ -1296,7 +1315,10 @@ func spawn_enemy_bullet(pos: Vector2, vel: Vector2, size: float, color: Color, d
 func _spawn_timed_boss() -> void:
 	var boss_num := wave / 5 + 1
 	boss_index = (boss_num - 1) % 2
-	if boss_index == 0: spawn_conductor()
+	_spawn_boss_idx(boss_index)
+
+func _spawn_boss_idx(idx: int) -> void:
+	if idx == 0: spawn_conductor()
 	else: spawn_spiral()
 
 func spawn_conductor() -> void:

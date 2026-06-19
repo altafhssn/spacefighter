@@ -71,7 +71,9 @@ var wk_badge: Label
 # misc
 var toast_lbl: Label
 var wave_intro_lbl: Label
+var announce_lbl: Label
 var boost_btn: Button
+var dash_btn: Button
 
 # overlays
 var start_overlay: Control
@@ -281,6 +283,12 @@ func build() -> void:
 	swap_btn.pressed.connect(func(): main.cycle_weapon())
 	gameplay_hud.add_child(swap_btn)
 
+	# DASH button — above BOOST, so the steering finger never has to let go
+	dash_btn = _neon_button("DASH", CY, 16, Vector2(130, 50))
+	dash_btn.position = Vector2(vp.x - 150, vp.y - 190)
+	dash_btn.pressed.connect(func(): main.trigger_dash())
+	gameplay_hud.add_child(dash_btn)
+
 	# floating joystick (under buttons)
 	var joy_view := Control.new()
 	joy_view.set_script(load("res://scripts/Joystick.gd"))
@@ -302,6 +310,16 @@ func build() -> void:
 	wave_intro_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	wave_intro_lbl.modulate.a = 0.0
 	add_child(wave_intro_lbl)
+
+	# warning banner shown before bosses / elites / guardians spawn
+	announce_lbl = _ctr(_glow("", fv_display, 34, MG_SOFT))
+	announce_lbl.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	announce_lbl.offset_top = _vp().y * 0.28
+	announce_lbl.offset_bottom = _vp().y * 0.28 + 96
+	announce_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
+	announce_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	announce_lbl.modulate.a = 0.0
+	add_child(announce_lbl)
 
 	_build_start()
 	_build_gameover()
@@ -701,6 +719,7 @@ func refresh() -> void:
 	if main.world_boss and wboss_wrap.visible:
 		wboss_fill.size.x = wboss_fill.get_meta("w") * clamp(main.world_boss.hp / main.world_boss.max_hp, 0.0, 1.0)
 	boost_btn.disabled = main.player.echo_meter < Data.BOOST.min_echo_to_start
+	dash_btn.disabled = main.player.dash_cooldown > 0.0
 	world_pos_lbl.text = "X %d · Y %d" % [round(main.player.position.x), round(main.player.position.y)]
 	mod_badge.text = main.modifier_badge
 	wk_badge.text = main.weekly_badge
@@ -759,6 +778,20 @@ func toast(text: String, _variant := "") -> void:
 	toast_lbl.modulate.a = 1.0
 	tw.tween_interval(1.2)
 	tw.tween_property(toast_lbl, "modulate:a", 0.0, 0.6)
+
+# Big centered warning banner shown ~1.3s before something new spawns.
+func announce(text: String, col: Color) -> void:
+	announce_lbl.text = text
+	announce_lbl.add_theme_color_override("font_color", col)
+	announce_lbl.add_theme_color_override("font_outline_color", Color(col.r, col.g, col.b, 0.25))
+	var tw := create_tween()
+	announce_lbl.modulate.a = 0.0
+	tw.tween_property(announce_lbl, "modulate:a", 1.0, 0.2)
+	# two quick pulses to read as an alert
+	tw.tween_property(announce_lbl, "modulate:a", 0.55, 0.25)
+	tw.tween_property(announce_lbl, "modulate:a", 1.0, 0.25)
+	tw.tween_interval(0.35)
+	tw.tween_property(announce_lbl, "modulate:a", 0.0, 0.45)
 
 func set_echo_overlay(on: bool) -> void:
 	echo_overlay.visible = on
