@@ -1,6 +1,6 @@
 extends Control
-## Parallax starfield + faint world grid, drawn in screen space and offset by
-## the camera position (port of initStarfield/drawStarfield).
+## Parallax starfield drawn in screen space and offset by the camera position
+## (port of initStarfield/drawStarfield).
 
 var main = null
 var nebulae: Array = []
@@ -52,19 +52,6 @@ func _draw() -> void:
 		np.x = fposmod(np.x, w + n.r * 2) - n.r
 		np.y = fposmod(np.y, h + n.r * 2) - n.r
 		Neon.glow(self, np, n.r, n.color, 0.035)
-
-	# World grid
-	var grid := 60.0
-	var off := Vector2(fposmod(-cam.x, grid), fposmod(-cam.y, grid))
-	var gc := Color(Data.CYAN.r, Data.CYAN.g, Data.CYAN.b, 0.05)
-	var gx := off.x
-	while gx < w:
-		draw_line(Vector2(gx, 0), Vector2(gx, h), gc, 1.0)
-		gx += grid
-	var gy := off.y
-	while gy < h:
-		draw_line(Vector2(0, gy), Vector2(w, gy), gc, 1.0)
-		gy += grid
 
 	# Star layers
 	for li in layers.size():
