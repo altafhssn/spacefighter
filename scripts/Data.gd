@@ -100,6 +100,106 @@ const WEAPONS := [
 ]
 
 # ------------------------------------------------------------
+# SURVIVOR LOADOUT
+# ------------------------------------------------------------
+# The original WEAPONS table remains for compatibility with old saves and UI.
+# New runs use this roster through WeaponSystem.gd. Stats are interpolated
+# between the listed level anchors so every level produces a useful increase.
+const SURVIVOR_WEAPONS := {
+	"pulse": {
+		"name": "PULSE LASER", "icon": "✦", "color": CYAN, "archetype": "direct",
+		"evolution": "triple_beam", "passive": "power_core",
+		"damage": [6.0, 8.0, 10.0, 12.0, 15.0],
+		"rate": [4.0, 4.5, 5.0, 5.5, 6.0],
+		"speed": [720.0, 720.0, 720.0, 760.0, 800.0],
+	},
+	"plasma": {
+		"name": "PLASMA CANNON", "icon": "●", "color": MAGENTA, "archetype": "direct",
+		"evolution": "supernova", "passive": "explosive_tip",
+		"damage": [30.0, 38.0, 45.0, 55.0, 65.0],
+		"rate": [1.0, 1.1, 1.2, 1.35, 1.5],
+		"speed": [400.0, 400.0, 410.0, 420.0, 430.0],
+		"radius": [40.0, 48.0, 55.0, 62.0, 70.0],
+	},
+	"nova": {
+		"name": "NOVA BLAST", "icon": "◎", "color": AMBER, "archetype": "area",
+		"evolution": "quasar", "passive": "energy_core",
+		"damage": [15.0, 20.0, 25.0, 32.0, 40.0],
+		"rate": [1.5, 1.65, 1.8, 1.9, 2.0],
+		"radius": [100.0, 115.0, 130.0, 145.0, 160.0],
+	},
+	"drones": {
+		"name": "DRONE SWARM", "icon": "◇", "color": CYAN_SOFT, "archetype": "orbit",
+		"evolution": "wingfleet", "passive": "ai_module",
+		"damage": [5.0, 6.5, 8.0, 10.0, 12.0],
+		"rate": [3.0, 3.5, 4.0, 4.5, 5.0],
+		"count": [2, 2, 3, 3, 4],
+	},
+	"gravity": {
+		"name": "GRAVITY MINE", "icon": "◉", "color": PURPLE, "archetype": "area",
+		"evolution": "event_horizon", "passive": "singularity_core",
+		"damage": [10.0, 12.0, 15.0, 20.0, 25.0],
+		"rate": [0.5, 0.55, 0.6, 0.7, 0.8],
+		"radius": [80.0, 90.0, 100.0, 110.0, 120.0],
+		"duration": [2.0, 2.5, 3.0, 3.5, 4.0],
+	},
+	"missiles": {
+		"name": "MISSILE POD", "icon": "➤", "color": GOLD, "archetype": "deploy",
+		"evolution": "barrage", "passive": "targeting_system",
+		"damage": [20.0, 25.0, 30.0, 38.0, 45.0],
+		"rate": [1.0, 1.25, 1.5, 1.75, 2.0],
+		"count": [1, 1, 2, 2, 3],
+		"radius": [30.0, 35.0, 40.0, 45.0, 50.0],
+	},
+	"shield": {
+		"name": "SHIELD SATELLITE", "icon": "◐", "color": GREEN, "archetype": "orbit",
+		"evolution": "aegis", "passive": "barrier_generator",
+		"damage": [3.0, 4.0, 5.0, 6.5, 8.0],
+		"rate": [1.5, 1.7, 2.0, 2.2, 2.5],
+		"arc": [90.0, 105.0, 120.0, 135.0, 150.0],
+		"count": [1, 1, 1, 1, 2],
+	},
+	"rail": {
+		"name": "RAIL DRIVER", "icon": "━", "color": AMBER_SOFT, "archetype": "direct",
+		"evolution": "annihilator", "passive": "capacitor",
+		"damage": [60.0, 75.0, 90.0, 112.0, 140.0],
+		"charge": [1.5, 1.35, 1.2, 1.1, 1.0],
+		"width": [4.0, 5.0, 6.0, 7.0, 8.0],
+	},
+}
+
+const PASSIVES := {
+	"power_core":       {"name": "POWER CORE",       "icon": "◆", "effect": "damage",    "per_level": 0.10, "pairs": "pulse"},
+	"explosive_tip":    {"name": "EXPLOSIVE TIP",    "icon": "✹", "effect": "splash",    "per_level": 0.08, "pairs": "plasma"},
+	"energy_core":      {"name": "ENERGY CORE",       "icon": "⚡", "effect": "fire_rate", "per_level": 0.10, "pairs": "nova"},
+	"ai_module":        {"name": "AI MODULE",         "icon": "⌘", "effect": "drone",     "per_level": 0.15, "pairs": "drones"},
+	"singularity_core": {"name": "SINGULARITY CORE", "icon": "◉", "effect": "area",      "per_level": 0.10, "pairs": "gravity"},
+	"targeting_system": {"name": "TARGETING SYSTEM", "icon": "⌖", "effect": "homing",    "per_level": 0.15, "pairs": "missiles"},
+	"barrier_generator":{"name": "BARRIER GENERATOR","icon": "◒", "effect": "shield",    "per_level": 0.15, "pairs": "shield"},
+	"capacitor":        {"name": "CAPACITOR",         "icon": "▰", "effect": "charge",    "per_level": 0.10, "pairs": "rail"},
+}
+
+const EVOLUTIONS := {
+	"triple_beam": {"name": "TRIPLE BEAM ARRAY", "icon": "≋", "weapon": "pulse"},
+	"supernova": {"name": "SUPERNOVA CANNON", "icon": "☀", "weapon": "plasma"},
+	"quasar": {"name": "QUASAR PULSE", "icon": "◎", "weapon": "nova"},
+	"wingfleet": {"name": "WINGFLEET COMMAND", "icon": "✥", "weapon": "drones"},
+	"event_horizon": {"name": "EVENT HORIZON", "icon": "◉", "weapon": "gravity"},
+	"barrage": {"name": "BARRAGE SYSTEM", "icon": "➤", "weapon": "missiles"},
+	"aegis": {"name": "AEGIS NETWORK", "icon": "◉", "weapon": "shield"},
+	"annihilator": {"name": "ANNIHILATOR BEAM", "icon": "━", "weapon": "rail"},
+}
+
+const MERGE_RECIPES := [
+	{"id": "genesis_ray", "name": "GENESIS RAY", "a": "triple_beam", "b": "supernova"},
+	{"id": "big_bang", "name": "BIG BANG", "a": "quasar", "b": "event_horizon"},
+	{"id": "arsenal_fleet", "name": "ARSENAL FLEET", "a": "wingfleet", "b": "barrage"},
+	{"id": "judgement", "name": "JUDGEMENT", "a": "aegis", "b": "annihilator"},
+	{"id": "phalanx_array", "name": "PHALANX ARRAY", "a": "triple_beam", "b": "wingfleet"},
+	{"id": "singularity_barrage", "name": "SINGULARITY BARRAGE", "a": "event_horizon", "b": "barrage"},
+]
+
+# ------------------------------------------------------------
 # UPGRADES (Survivor.io style level-up pool)
 # id, icon, name, desc, rarity (common/rare)
 # ------------------------------------------------------------

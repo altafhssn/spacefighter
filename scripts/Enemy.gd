@@ -21,6 +21,10 @@ var spawn_protect := 0.0
 var vel: Vector2 = Vector2.ZERO
 var remove := false
 var is_elite := false
+var slow_timer := 0.0
+var slow_factor := 1.0
+var burn_timer := 0.0
+var burn_dps := 0.0
 
 # behavior-specific
 var drift_angle := 0.0
@@ -36,9 +40,19 @@ var fire_interval := 2.5
 var spiral_ang := 0.0
 var spiral_radius := 60.0
 var spiral_center: Vector2 = Vector2.ZERO
+var snipe_target: Vector2 = Vector2.ZERO
+var snipe_target_ready := false
+var snipe_side := 0.0
 
 func update(dt: float) -> void:
 	age += dt
+	if burn_timer > 0.0:
+		burn_timer -= dt
+		hp -= burn_dps * dt
+	if slow_timer > 0.0:
+		slow_timer -= dt
+	else:
+		slow_factor = 1.0
 	if hit_flash > 0: hit_flash -= dt
 	if spawn_protect > 0: spawn_protect -= dt
 	var p: Vector2 = main.player.position
@@ -71,12 +85,17 @@ func update(dt: float) -> void:
 			vel = Vector2(cos(ang), sin(ang)) * speed
 		"snipe":
 			if state == "positioning":
-				var off: float = (-1.0 if position.x < p.x else 1.0) * (220.0 + randf() * 80.0)
-				var target := Vector2(p.x + off, p.y - 120.0 + randf() * 60.0)
-				vel = (target - position) * 1.5
-				if abs(target.x - position.x) < 5 and abs(target.y - position.y) < 5:
+				if not snipe_target_ready:
+					_choose_snipe_target(p)
+				# Keep one committed destination instead of choosing a random
+				# point every frame. The old jitter made the Lancer's velocity
+				# impossible for auto-aim to predict while the player strafed.
+				var to_target: Vector2 = snipe_target - position
+				vel = to_target.limit_length(180.0)
+				if to_target.length() < 10.0:
 					state = "charging"
 					fire_timer = beam_telegraph
+					snipe_target_ready = false
 			elif state == "charging":
 				vel = Vector2.ZERO
 				telegraph = 1.0 - (fire_timer / beam_telegraph)
@@ -87,10 +106,12 @@ func update(dt: float) -> void:
 					fire_timer = 1.5
 					telegraph = 0.0
 			elif state == "cooldown":
+				vel = Vector2.ZERO
 				fire_timer -= dt
 				if fire_timer <= 0:
-					state = "charging"
-					fire_timer = beam_telegraph
+					state = "positioning"
+					snipe_side *= -1.0
+					snipe_target_ready = false
 		"spiral_out":
 			spiral_radius += speed * dt
 			spiral_ang += dt * 1.5 * (1.0 if spiral_ang > 0 else -1.0)
@@ -116,7 +137,7 @@ func update(dt: float) -> void:
 		if sep != Vector2.ZERO:
 			vel += sep.normalized() * speed * 0.85
 
-	position += vel * dt
+	position += vel * dt * slow_factor
 
 	# Pursuers never vanish from distance — if the player outruns them they
 	# re-enter from the spawn ring so the wave stays a threat.
@@ -135,8 +156,16 @@ func _reengage(p: Vector2) -> void:
 	position = p + Vector2(cos(ang), sin(ang)) * main.view_size.length() * 0.62
 	if behavior == "snipe":
 		state = "positioning"; fire_timer = 0.0; telegraph = 0.0
+		snipe_target_ready = false
 	elif behavior == "dive":
 		state = "aiming"; aim_time = 0.9; telegraph = 0.0
+
+func _choose_snipe_target(p: Vector2) -> void:
+	if snipe_side == 0.0:
+		snipe_side = -1.0 if position.x < p.x else 1.0
+	var lateral := 230.0 + randf_range(0.0, 55.0)
+	snipe_target = p + Vector2(snipe_side * lateral, randf_range(-145.0, -75.0))
+	snipe_target_ready = true
 
 func _fire_beam() -> void:
 	var p: Vector2 = main.player.position

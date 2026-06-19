@@ -9,11 +9,17 @@ var world: Node2D
 var worldfx: Node2D
 var starfield: Control
 var hud: CanvasLayer
+var weapon_system: WeaponSystem
 
 # --- entities ---
 var player: Player
 var boss = null
 var world_boss = null
+
+# boss arena — confines the player to a visible ring during a boss fight
+var arena_active := false
+var arena_center: Vector2 = Vector2.ZERO
+var arena_radius := 0.0
 var enemies: Array = []
 var bullets: Array = []
 var enemy_bullets: Array = []
@@ -112,6 +118,8 @@ var joy_mag := 0.0                      # 0..1 push amount
 
 # preloads
 const PlayerScript = preload("res://scripts/Player.gd")
+const BossCatalogScript = preload("res://scripts/BossCatalog.gd")
+const CodexBossScript = preload("res://scripts/CodexBoss.gd")
 
 func _ready() -> void:
 	randomize()
@@ -465,6 +473,7 @@ func new_game() -> void:
 	particles.clear(); decals.clear(); damage_numbers.clear()
 	if boss and is_instance_valid(boss): boss.queue_free()
 	boss = null
+	arena_active = false
 	for k in landmark_cache:
 		var lm = landmark_cache[k]
 		if lm != null and is_instance_valid(lm): lm.queue_free()
@@ -472,6 +481,8 @@ func new_game() -> void:
 	nearby_landmarks.clear()
 	if world_boss and is_instance_valid(world_boss): world_boss.queue_free()
 	world_boss = null
+	if weapon_system and is_instance_valid(weapon_system): weapon_system.queue_free()
+	weapon_system = null
 	xp_mult = 1.0; xp_mult_timer = 0.0; beacon_timer = 0.0
 	if player and is_instance_valid(player): player.queue_free()
 
@@ -502,6 +513,12 @@ func new_game() -> void:
 	player.z_index = 20
 	world.add_child(player)
 
+	weapon_system = WeaponSystem.new()
+	weapon_system.main = self
+	weapon_system.z_index = 19
+	world.add_child(weapon_system)
+	weapon_system.reset_run()
+
 	# XP
 	xp_level = 1; xp_current = 0; xp_to_next = Data.xp_required(1)
 
@@ -521,6 +538,29 @@ func start_game() -> void:
 
 func restart() -> void:
 	start_game()
+
+func return_to_base() -> void:
+	boost_active = false
+	dragging = false
+	joy_active = false
+	joy_dir = Vector2.ZERO
+	joy_mag = 0.0
+	time_scale = 1.0
+	state = "start"
+	hud.show_start()
+
+func toggle_pause() -> void:
+	if state == "playing":
+		state = "paused"
+		boost_active = false
+		dragging = false
+		joy_active = false
+		joy_dir = Vector2.ZERO
+		joy_mag = 0.0
+		hud.show_pause()
+	elif state == "paused":
+		state = "playing"
+		hud.hide_pause()
 
 # ------------------------------------------------------------
 # XP / LEVELS
@@ -546,32 +586,23 @@ func trigger_level_up() -> void:
 	pending_level_ups -= 1
 	state = "levelup"
 	time_scale = 0.0
-	var pool: Array = Data.UPGRADES.filter(func(up): return _is_upgrade_available(up.id))
+	var pool: Array = weapon_system.get_cards()
 	if pool.is_empty():
-		pending_level_ups = 0
-		state = "playing"
-		time_scale = 1.0
-		return
-	var choices: Array = []
-	for i in 3:
-		if pool.is_empty(): break
-		var want_rare := randf() < 0.3
-		var idx := -1
-		var subset := []
-		for u in pool:
-			if (want_rare and u.rarity == "rare") or (not want_rare and u.rarity == "common"):
-				subset.append(u)
-		if subset.is_empty(): subset = pool
-		var pick = subset[randi() % subset.size()]
-		idx = pool.find(pick)
-		choices.append(pool[idx])
-		pool.remove_at(idx)
-	hud.show_levelup(choices)
+		# Keep utility upgrades as a fallback once the loadout is complete.
+		pool = Data.UPGRADES.filter(func(up): return _is_upgrade_available(up.id))
+		pool.shuffle()
+		pool = pool.slice(0, mini(3, pool.size()))
+	hud.show_levelup(pool)
 	hud.toast("LEVEL %d!" % xp_level, "gold")
 
 func choose_upgrade(up: Dictionary) -> void:
-	_grant_upgrade(up.id)
+	if up.has("kind"):
+		weapon_system.apply_card(up)
+		upgrade_stacks[up.id] = upgrade_stacks.get(up.id, 0) + 1
+	else:
+		_grant_upgrade(up.id)
 	hud.hide_levelup()
+	hud.update_weapon()
 	hud.toast(up.name + " ACQUIRED", "green")
 	if pending_level_ups > 0:
 		trigger_level_up()
@@ -652,7 +683,7 @@ func update(raw_dt: float) -> void:
 		trigger_echo_phase()
 
 	_update_movement(raw_dt, dt)
-	_update_fire(dt)
+	weapon_system.update(dt)
 	update_boost(raw_dt)
 
 	if combo > 1:
@@ -700,13 +731,14 @@ func update(raw_dt: float) -> void:
 		elite_timer = 0.0
 		_announce_then("⚠ ELITE INCOMING", Data.AMBER, func(): spawn_elite())
 
-	# boss every 60s
+	# Safety timer: advance the same Codex order used by wave bosses.
 	boss_timer += raw_dt
 	if boss_timer >= Data.BOSS_INTERVAL and boss == null and world_boss == null and wave_spawn_queue.is_empty() and not _pending:
 		boss_timer = 0.0
-		var bn := wave / 5 + 1
-		var bname := "THE CONDUCTOR" if (bn - 1) % 2 == 0 else "THE SPIRAL"
-		_announce_then("⚠ WARNING\n" + bname, Data.MAGENTA, func(): _spawn_timed_boss())
+		var encounter := wave / 5 + 1
+		var boss_id: String = BossCatalogScript.id_for_encounter(encounter)
+		var bname: String = BossCatalogScript.DEFINITIONS[boss_id].name
+		_announce_then("⚠ WARNING\n" + bname, Data.MAGENTA, func(): _spawn_boss_id(boss_id))
 
 	if screen_shake > 0:
 		screen_shake = max(0.0, screen_shake - raw_dt * 2.0)
@@ -734,6 +766,8 @@ func _cull(arr: Array, _pp: Vector2) -> void:
 func _update_movement(raw_dt: float, _dt: float) -> void:
 	var p := player
 	var move_mult: float = (1.0 + upgrades.moveSpeed) * get_boost_mult() * player_speed_mult()
+	if weapon_system:
+		move_mult *= weapon_system.movement_multiplier()
 	var prev := p.position
 
 	if control_mode == "joystick":
@@ -782,6 +816,14 @@ func _update_movement(raw_dt: float, _dt: float) -> void:
 	if p.dash_cooldown > 0: p.dash_cooldown -= raw_dt
 	if p.invuln > 0: p.invuln -= raw_dt
 	if p.shield_timer > 0: p.shield_timer -= raw_dt
+
+	# confine the ship inside the boss arena (can't fly away from the fight)
+	if arena_active:
+		var off := p.position - arena_center
+		if off.length() > arena_radius:
+			p.position = arena_center + off.normalized() * arena_radius
+			p.target = p.position
+			joy_mag = 0.0
 
 func _nearest_target(from: Vector2):
 	var best = null
@@ -870,6 +912,39 @@ func _update_bullets(dt: float) -> void:
 	var keep: Array = []
 	for b in bullets:
 		b.set_time(time)
+		b.prev_position = b.position
+		if b.homing_turn_rate > 0.0:
+			if b.target == null or not is_instance_valid(b.target):
+				b.target = _nearest_target(b.position)
+			if b.target != null:
+				var desired: float = (b.target.position - b.position).angle()
+				var current: float = b.vel.angle()
+				var turn: float = clampf(wrapf(desired - current, -PI, PI),
+					-b.homing_turn_rate * dt, b.homing_turn_rate * dt)
+				b.vel = Vector2.from_angle(current + turn) * b.vel.length()
+		if b.is_ring:
+			b.ring_radius = min(b.ring_max_radius, b.ring_radius + b.ring_speed * dt)
+			b.life -= dt
+			for e in enemies:
+				if e.remove: continue
+				var d: float = e.position.distance_to(b.position)
+				if b.field_dps > 0.0:
+					if d <= b.ring_radius + e.size:
+						_damage_enemy(e, b.field_dps * dt, b)
+				elif not b.ring_hits.has(e) and abs(d - b.ring_radius) <= e.size + max(8.0, b.ring_speed * dt):
+					_damage_enemy(e, b.damage, b)
+					b.ring_hits.append(e)
+			if boss and boss.phase > 0 and not b.ring_hits.has(boss):
+				var boss_dist: float = boss.position.distance_to(b.position)
+				if b.field_dps > 0.0 and boss_dist <= b.ring_radius + boss.size:
+					damage_boss(b.field_dps * dt * b.boss_damage_mult, b)
+				elif abs(boss_dist - b.ring_radius) <= boss.size + 10.0:
+					damage_boss(b.damage * b.boss_damage_mult, b)
+					b.ring_hits.append(boss)
+			b.queue_redraw()
+			if b.life > 0: keep.append(b)
+			else: b.queue_free()
+			continue
 		if b.is_singularity and b.singularity_activated:
 			b.singularity_duration -= dt
 			for e in enemies:
@@ -879,14 +954,34 @@ func _update_bullets(dt: float) -> void:
 					var pull: Vector2 = (b.position - e.position).normalized()
 					var force: float = (1.0 - ed / b.singularity_radius) * b.singularity_pull
 					e.position += pull * force * dt
-					e.hp -= b.damage * dt * 0.5
+					e.hp -= b.damage * dt
 					e.hit_flash = 0.05
 					if e.hp <= 0: kill_enemy(e, b.is_critical)
+			if boss and boss.phase > 0:
+				var bd: float = boss.position.distance_to(b.position)
+				if bd < b.singularity_radius:
+					damage_boss(b.damage * dt * 0.35, b)
+			if world_boss:
+				var wd: float = world_boss.position.distance_to(b.position)
+				if wd < b.singularity_radius:
+					damage_world_boss(b.damage * dt * 0.35)
 			for eb in enemy_bullets:
 				var ed: float = eb.position.distance_to(b.position)
 				if ed < b.singularity_radius and ed > 5:
 					eb.vel += (b.position - eb.position).normalized() * 300.0 * dt
-			if b.singularity_duration <= 0: b.life = 0
+					if b.destroys_enemy_bullets and ed < b.singularity_radius * 0.25:
+						eb.hit = true
+			if b.singularity_duration <= 0:
+				if b.detonation_damage > 0.0:
+					var old_damage: float = b.damage
+					var old_radius: float = b.splash_radius
+					b.damage = b.detonation_damage
+					b.splash_radius = b.detonation_radius
+					b.splash_factor = 1.0
+					_splash_damage(b.position, b)
+					b.damage = old_damage
+					b.splash_radius = old_radius
+				b.life = 0
 		else:
 			b.trail.append(b.position)
 			if b.trail.size() > 6: b.trail.pop_front()
@@ -923,8 +1018,9 @@ func check_collisions() -> void:
 		if b.hit or b.singularity_activated: continue
 		# boss
 		if boss and boss.phase > 0 and not b.pierce_hits.has(boss):
-			if b.position.distance_to(boss.position) < boss.size + b.size:
-				damage_boss(b.damage)
+			if _bullet_hits(b, boss.position, boss.size + b.size):
+				damage_boss(b.damage * b.boss_damage_mult, b)
+				_splash_damage(b.position, b, boss)
 				if b.is_singularity:
 					_activate_singularity(b)
 				elif b.pierce > 0:
@@ -936,8 +1032,9 @@ func check_collisions() -> void:
 				if b.hit or b.singularity_activated: continue
 		# world mini-boss
 		if world_boss and not b.pierce_hits.has(world_boss):
-			if b.position.distance_to(world_boss.position) < world_boss.size + b.size:
-				damage_world_boss(b.damage)
+			if _bullet_hits(b, world_boss.position, world_boss.size + b.size):
+				damage_world_boss(b.damage * b.boss_damage_mult)
+				_splash_damage(b.position, b, world_boss)
 				if b.is_singularity:
 					_activate_singularity(b)
 				elif b.pierce > 0:
@@ -950,7 +1047,7 @@ func check_collisions() -> void:
 		# enemies
 		for e in enemies:
 			if e.remove or b.pierce_hits.has(e): continue
-			if b.position.distance_to(e.position) < e.size + b.size:
+			if _bullet_hits(b, e.position, e.size + b.size):
 				if e.behavior == "shield" and e.shield_hp > 0 and not e.shield_open:
 					var ang_to: float = (b.position - e.position).angle()
 					var ad := wrapf(ang_to - e.shield_angle, -PI, PI)
@@ -962,8 +1059,8 @@ func check_collisions() -> void:
 						if not b.hit: continue
 						break
 				var dmg_mult: float = Data.SPAWN_PROTECTION_MULT if e.spawn_protect > 0 else 1.0
-				e.hp -= b.damage * dmg_mult
-				e.hit_flash = 0.1
+				_damage_enemy(e, b.damage * dmg_mult, b)
+				_splash_damage(b.position, b, e)
 				if b.is_singularity and not b.singularity_activated:
 					_activate_singularity(b)
 				elif b.pierce > 0:
@@ -975,7 +1072,6 @@ func check_collisions() -> void:
 				var damage_text := "CRIT %d" % shown_damage if b.is_critical else str(shown_damage)
 				spawn_damage_number(b.position, damage_text, Data.AMBER, b.is_critical)
 				Audio.hit()
-				if e.hp <= 0: kill_enemy(e, b.is_critical)
 				if b.hit or b.singularity_activated: break
 
 	# player hit
@@ -1014,6 +1110,12 @@ func check_collisions() -> void:
 		else: kept.append(e)
 	enemies = kept
 
+func _bullet_hits(b: Bullet, target_pos: Vector2, hit_radius: float) -> bool:
+	# Swept segment collision prevents fast shots from skipping small targets on
+	# low-FPS frames or while both ship and enemy are moving laterally.
+	var closest: Vector2 = Geometry2D.get_closest_point_to_segment(target_pos, b.prev_position, b.position)
+	return closest.distance_squared_to(target_pos) <= hit_radius * hit_radius
+
 # ------------------------------------------------------------
 # KILL / DAMAGE
 # ------------------------------------------------------------
@@ -1023,6 +1125,37 @@ func _activate_singularity(b: Bullet) -> void:
 	b.life = b.singularity_duration + 0.1
 	spawn_particles(b.position, Data.PURPLE, 30, 6.0)
 	hud.toast("SINGULARITY ACTIVE", "green")
+
+func _damage_enemy(e: Enemy, amount: float, source: Bullet = null) -> void:
+	if e.remove:
+		return
+	e.hp -= amount
+	e.hit_flash = 0.1
+	if source:
+		if source.knockback > 0.0:
+			var away := (e.position - source.position).normalized()
+			e.position += away * source.knockback
+		if source.burn_duration > 0.0:
+			e.burn_timer = max(e.burn_timer, source.burn_duration)
+			e.burn_dps = max(e.burn_dps, source.burn_dps)
+		if source.weapon_id == "gravity":
+			e.slow_timer = max(e.slow_timer, 0.3)
+			e.slow_factor = min(e.slow_factor, 0.5)
+	if e.hp <= 0:
+		kill_enemy(e, source.is_critical if source else false)
+
+func _splash_damage(center: Vector2, source: Bullet, primary = null) -> void:
+	if source.splash_radius <= 0.0:
+		return
+	for e in enemies:
+		if e.remove or e == primary:
+			continue
+		if e.position.distance_to(center) <= source.splash_radius + e.size:
+			_damage_enemy(e, source.damage * source.splash_factor, source)
+	if boss and boss != primary and boss.phase > 0 and boss.position.distance_to(center) <= source.splash_radius + boss.size:
+		damage_boss(source.damage * source.splash_factor * source.boss_damage_mult, source)
+	if world_boss and world_boss != primary and world_boss.position.distance_to(center) <= source.splash_radius + world_boss.size:
+		damage_world_boss(source.damage * source.splash_factor * source.boss_damage_mult)
 
 func active_score_mult() -> float:
 	return score_mult() * (2.0 if echo_phase else 1.0)
@@ -1059,7 +1192,7 @@ func kill_enemy(e: Enemy, is_crit := false) -> void:
 			spawn_particles(player.position, Data.GREEN, 8, 2.0)
 			hud.toast("+1 HP", "green")
 
-func damage_player() -> void:
+func damage_player(amount: int = 1) -> void:
 	var p := player
 	if p.invuln > 0: return
 	if p.shield_timer > 0:
@@ -1068,7 +1201,7 @@ func damage_player() -> void:
 		spawn_particles(p.position, Data.GREEN, 16, 4.0)
 		hud.toast("SHIELD ABSORBED", "green")
 		return
-	p.hp -= 1
+	p.hp -= amount
 	p.invuln = 1.2
 	combo = 1; combo_timer = 0.0
 	screen_shake = 0.6
@@ -1166,10 +1299,10 @@ func start_wave(n: int) -> void:
 	hud.show_wave_intro(n)
 	if n > 1: Audio.wave_start()
 	if n % 5 == 0:
-		var boss_num := n / 5
-		boss_index = (boss_num - 1) % 2
-		var bname := "THE CONDUCTOR" if boss_index == 0 else "THE SPIRAL"
-		_announce_then("⚠ WARNING\n" + bname, Data.MAGENTA, _spawn_boss_idx.bind(boss_index))
+		var encounter := n / 5
+		var boss_id: String = BossCatalogScript.id_for_encounter(encounter)
+		var bname: String = BossCatalogScript.DEFINITIONS[boss_id].name
+		_announce_then("⚠ WARNING\n" + bname, Data.MAGENTA, _spawn_boss_id.bind(boss_id))
 		return
 	var patterns := generate_wave_pattern(n)
 	var t := 0.0
@@ -1313,13 +1446,34 @@ func spawn_enemy_bullet(pos: Vector2, vel: Vector2, size: float, color: Color, d
 	enemy_bullets.append(b)
 
 func _spawn_timed_boss() -> void:
-	var boss_num := wave / 5 + 1
-	boss_index = (boss_num - 1) % 2
-	_spawn_boss_idx(boss_index)
+	var encounter := wave / 5 + 1
+	_spawn_boss_id(BossCatalogScript.id_for_encounter(encounter))
 
 func _spawn_boss_idx(idx: int) -> void:
 	if idx == 0: spawn_conductor()
 	else: spawn_spiral()
+
+func _spawn_boss_id(id: String) -> void:
+	match id:
+		"conductor": spawn_conductor()
+		"spiral": spawn_spiral()
+		_: spawn_codex_boss(id)
+
+func spawn_codex_boss(id: String) -> void:
+	if not BossCatalogScript.DEFINITIONS.has(id):
+		return
+	boss_timer = 0.0
+	var b = CodexBossScript.new()
+	b.main = self
+	b.setup(id, wave)
+	var diag := view_size.length()
+	b.position = Vector2(player.position.x, player.position.y - diag * 0.5)
+	b.z_index = 18
+	world.add_child(b)
+	boss = b
+	hud.show_boss_bar(b.boss_name)
+	hud.toast("WARNING: %s INBOUND" % b.boss_name, "warning")
+	Audio.boss_warn()
 
 func spawn_conductor() -> void:
 	boss_timer = 0.0
@@ -1330,6 +1484,7 @@ func spawn_conductor() -> void:
 	boss.position = Vector2(player.position.x, player.position.y - diag * 0.5)
 	boss.z_index = 18
 	world.add_child(boss)
+	_open_arena()
 	hud.show_boss_bar("THE CONDUCTOR")
 	hud.toast("WARNING: CONDUCTOR INBOUND", "warning")
 	Audio.boss_warn()
@@ -1343,32 +1498,61 @@ func spawn_spiral() -> void:
 	boss.position = Vector2(player.position.x, player.position.y - diag * 0.5)
 	boss.z_index = 18
 	world.add_child(boss)
+	_open_arena()
 	hud.show_boss_bar("THE SPIRAL")
 	hud.toast("WARNING: SPIRAL INBOUND", "warning")
 	Audio.boss_warn()
 
-func damage_boss(amount: float) -> void:
+func _open_arena() -> void:
+	arena_active = true
+	arena_center = player.position
+	# 3x the original 0.42 — a much roomier dodge space
+	arena_radius = min(view_size.x, view_size.y) * 1.26
+
+func damage_boss(amount: float, source: Bullet = null) -> void:
 	if boss == null or boss.phase == 0: return
+	if boss.has_method("damage_multiplier"):
+		amount *= boss.damage_multiplier(source)
+		if amount <= 0.0:
+			return
 	boss.hp -= amount
+	if "hit_flash" in boss:
+		boss.hit_flash = 0.1
 	Audio.boss_hit()
 	if boss.hp <= 0:
-		spawn_particles(boss.position, Data.AMBER, 80, 8.0)
-		spawn_particles(boss.position, Data.MAGENTA, 50, 10.0)
-		spawn_particles(boss.position, Data.WHITE, 30, 6.0)
-		spawn_decal(boss.position, 40.0, Data.AMBER)
-		var boss_gain := int(round(6000 * active_score_mult()))
-		score += boss_gain
-		screen_shake = 1.5
-		hit_pause = 0.2
-		zoom_pulse = 1.08
-		hud.toast("BOSS DEFEATED — +%d" % boss_gain, "gold")
-		Audio.boss_kill()
-		hud.hide_boss_bar()
-		boss.queue_free()
-		boss = null
-		boss_timer = 0.0   # full 90s breather before the next timed boss
-		# Wave advancement is handled by the single wave-transition path in update()
-		# once the arena clears — avoids the boss death double-advancing the wave.
+		defeat_boss(true)
+
+func defeat_boss(grant_reward := true) -> void:
+	if boss == null:
+		return
+	var defeated = boss
+	spawn_particles(defeated.position, Data.AMBER, 80, 8.0)
+	spawn_particles(defeated.position, Data.MAGENTA, 50, 10.0)
+	spawn_particles(defeated.position, Data.WHITE, 30, 6.0)
+	spawn_decal(defeated.position, 40.0, Data.AMBER)
+	var boss_gain := int(round(6000 * active_score_mult())) if grant_reward else 0
+	score += boss_gain
+	screen_shake = 1.5
+	hit_pause = 0.2
+	zoom_pulse = 1.08
+	hud.toast("BOSS DEFEATED — +%d" % boss_gain, "gold")
+	Audio.boss_kill()
+	hud.hide_boss_bar()
+	# loot: a generous scattered burst of XP gems so the kill pays off
+	if grant_reward:
+		var loot := 12 + wave
+		for i in loot:
+			var ang := randf() * TAU
+			var r := 16.0 + randf() * 110.0
+			spawn_xp_gem(defeated.position + Vector2(cos(ang), sin(ang)) * r, 4)
+		# top off the player as a reward
+		if player.hp < player.max_hp:
+			player.hp += 1
+		hud.toast("LOOT RECOVERED", "green")
+	defeated.queue_free()
+	boss = null
+	boss_timer = 0.0
+	arena_active = false
 
 # ------------------------------------------------------------
 # XP GEMS / PICKUPS
@@ -1477,10 +1661,11 @@ func set_boost(on: bool) -> void:
 # WEAPONS / DASH
 # ------------------------------------------------------------
 func cycle_weapon() -> void:
-	player.weapon_idx = (player.weapon_idx + 1) % Data.WEAPONS.size()
+	player.weapon_idx = (player.weapon_idx + 1) % max(1, weapon_system.weapons.size())
 	hud.update_weapon()
 	Audio.weapon_swap()
-	hud.toast(Data.WEAPONS[player.weapon_idx].name + " ENGAGED", "green")
+	var entry: Dictionary = weapon_system.weapons[player.weapon_idx]
+	hud.toast(Data.SURVIVOR_WEAPONS[entry.id].name + " FOCUSED", "green")
 
 func trigger_dash() -> void:
 	var p := player
@@ -1509,6 +1694,10 @@ func trigger_dash() -> void:
 # INPUT
 # ------------------------------------------------------------
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+		if state == "playing" or state == "paused":
+			toggle_pause()
+		return
 	if state != "playing":
 		return
 	if event is InputEventScreenTouch:

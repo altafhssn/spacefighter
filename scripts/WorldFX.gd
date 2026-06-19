@@ -15,6 +15,23 @@ func _process(_dt: float) -> void:
 func _draw() -> void:
 	if main == null:
 		return
+
+	# Boss arena boundary — pulsing dashed ring the player can't cross
+	if main.arena_active:
+		var c: Vector2 = main.arena_center
+		var r: float = main.arena_radius
+		var pulse: float = 0.45 + sin(main.time * 2.5) * 0.18
+		var col := Color(Data.MAGENTA.r, Data.MAGENTA.g, Data.MAGENTA.b, pulse)
+		var segs := 64
+		for i in segs:
+			if i % 2 == 1:
+				continue
+			var a0: float = (float(i) / segs) * TAU + main.time * 0.15
+			var a1: float = (float(i + 1) / segs) * TAU + main.time * 0.15
+			draw_arc(c, r, a0, a1, 6, col, 3.0)
+		# soft inner edge glow
+		draw_arc(c, r - 4.0, 0, TAU, 96, Color(Data.MAGENTA.r, Data.MAGENTA.g, Data.MAGENTA.b, 0.08), 8.0)
+
 	# Decals (under everything else fx)
 	for d in main.decals:
 		var a: float = d.life / d.max_life * 0.4

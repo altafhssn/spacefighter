@@ -6,6 +6,7 @@ extends Node2D
 ## attack state machine with several aimed and bullet-hell patterns per phase.
 
 var main = null
+var vel: Vector2 = Vector2.ZERO
 
 var type := "conductor"
 var hp := 700.0
@@ -57,9 +58,11 @@ func setup_spiral() -> void:
 
 
 func update(dt: float) -> void:
+	var old_position := position
 	age += dt
 	if type == "conductor": _update_conductor(dt)
 	else: _update_spiral(dt)
+	vel = (position - old_position) / maxf(dt, 0.001)
 	queue_redraw()
 
 

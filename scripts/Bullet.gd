@@ -5,6 +5,7 @@ extends Node2D
 
 var friendly := true
 var vel: Vector2 = Vector2.ZERO
+var prev_position: Vector2 = Vector2.ZERO
 var size := 4.0
 var color: Color = Data.CYAN
 var damage := 6.0
@@ -13,6 +14,29 @@ var hit := false
 var is_beam := false
 var is_critical := false
 var trail: Array = []   # world-space Vector2
+var weapon_id := ""
+var target = null
+var homing_turn_rate := 0.0
+var splash_radius := 0.0
+var splash_factor := 0.5
+var knockback := 0.0
+var burn_dps := 0.0
+var burn_duration := 0.0
+var boss_damage_mult := 1.0
+var shield_break := false
+var reflected := false
+
+# expanding pulse / persistent field
+var is_ring := false
+var ring_radius := 0.0
+var ring_max_radius := 0.0
+var ring_speed := 400.0
+var ring_hits: Array = []
+var field_dps := 0.0
+var field_tick := 0.0
+var destroys_enemy_bullets := false
+var detonation_damage := 0.0
+var detonation_radius := 0.0
 
 # pierce
 var pierce := 0
@@ -26,6 +50,10 @@ var singularity_duration := 1.5
 var singularity_pull := 200.0
 
 func _draw() -> void:
+	if is_ring:
+		draw_arc(Vector2.ZERO, ring_radius, 0.0, TAU, 64, Color(color, 0.75), max(2.0, size), true)
+		Neon.glow(self, Vector2.ZERO, ring_radius, color, 0.12)
+		return
 	if is_singularity and singularity_activated:
 		var pulse := 1.0 + sin(main_time() * 8.0) * 0.15
 		Neon.glow(self, Vector2.ZERO, singularity_radius * pulse, Data.PURPLE, 0.25)

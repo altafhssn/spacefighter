@@ -19,7 +19,7 @@ Open the folder in Godot 4.6+ and press **F5**, or from the command line:
 |-------|--------|
 | Drag (mouse/touch) | Move ship |
 | Quick tap | Dash (i-frames) |
-| Swipe up **or** `Q` / `Tab` | Cycle weapon |
+| Swipe up **or** `Q` / `Tab` | Cycle focused weapon HUD slot |
 | Hold **» BOOST** button **or** `Shift` | Boost (drains Echo) |
 | `Space` | Dash |
 
@@ -29,14 +29,20 @@ Pick **FOLLOW** or **DIRECT** control on the start screen.
 
 - **World-space camera** that follows the player with smoothing, screen shake and a zoom-pulse on hits.
 - **Movement**: follow/direct modes, velocity smoothing, banking, engine trail, dash with i-frames.
-- **4 weapons** — Pulse (single), Lance (pierce), Spread, Singularity (gravity-well bomb) — with auto-fire at the nearest threat.
+- **8-weapon Survivor loadout** — Pulse Laser, Plasma Cannon, Nova Blast,
+  Drone Swarm, Gravity Mine, Missile Pod, Shield Satellite, and Rail Driver.
+  Up to four equipped weapons auto-fire simultaneously.
 - **4 enemy types** with their behaviors — Drone (drift), Diver (aim→dive), Bulwark (directional shield), Lancer (reposition→charge→beam) — plus spawn-protection and HP scaling by wave.
 - **Survivor.io-style waves**: random / circle / line / vortex / cross spawn patterns scaling with wave number.
-- **XP gems → level-ups** with a 3-card upgrade draft from the full 16-upgrade pool (rarity-weighted).
+- **XP gems → level-ups** with weapon/passive unlocks, five item levels,
+  guaranteed evolution cards, four weapon slots, and four passive slots.
 - **Echo systems**: Echo meter, Echo Phase (slow-mo + 2× score), and Echo Rewind on lethal hit.
 - **Combo system** with crit hits, hit-pause and lifesteal.
 - **Boost** (Echo-draining speed burst) with the Overdrive / Efficient-Boost upgrades.
-- **Two bosses** — The Conductor (radial batons → direct fire) and The Spiral (spawning arms, phase spin reversal, collapse) — with phase transitions and a boss bar.
+- **Seven rotating major bosses** — The Conductor, The Spiral, The Warden,
+  The Stalker, The Sentry, The Summoner, and The Bomber — with Codex HP
+  scaling, phase mechanics, and a shared boss director. Eight additional Codex
+  encounters are registered for later mechanic batches.
 - **Elite enemies** every 30s and a timed boss every 60s.
 - **Daily + weekly modifiers** (deterministic by date) with their gameplay effects (swarm/elite/speed/greed/explorer, hunt-day elites, etc.), shown as badges in-game and as pills on the start screen.
 - **Procedural audio**: synthesized SFX (shoot/hit/kill/dash/damage/echo/boss/pickup/rewind…) and adaptive bass+arp music that scales with your combo — same design as the WebAudio original.
@@ -60,6 +66,7 @@ scripts/
   Starfield.gd       Parallax stars + world grid (screen space)
   WorldFX.gd         Particles / decals / damage numbers renderer
   HUD.gd             HUD + overlays (built in code)
+  UIDesignSystem.gd  Shared UI colors, typography, spacing, touch targets, panels, and buttons
   Neon.gd            Layered-glow drawing helpers
 ```
 
