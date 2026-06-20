@@ -15,6 +15,7 @@ var radius := 50.0
 var color: Color = Data.AMBER
 var icon := "⬡"
 var font: Font
+var redraw_timer := 0.0
 
 func _ready() -> void:
 	font = ThemeDB.fallback_font
@@ -23,12 +24,14 @@ func _ready() -> void:
 	color = def.color
 	icon = def.icon
 
-func _process(_dt: float) -> void:
+func _process(dt: float) -> void:
 	# Only animate/redraw landmarks near the player; cached far ones stay idle.
 	var near: bool = main and main.player and position.distance_to(main.player.position) < 1600.0
 	visible = near
-	if near:
+	redraw_timer -= dt
+	if near and redraw_timer <= 0.0:
 		queue_redraw()
+		redraw_timer = 1.0 / 20.0
 
 func _draw() -> void:
 	var t: float = main.time if main else 0.0
@@ -40,14 +43,19 @@ func _draw() -> void:
 		_icon(Color(color, 0.32), 20)
 		return
 
-	# guarded warning ring + skull
-	if guarded and not guard_triggered:
+	# Guarded landmarks always explain the lock and exact objective.
+	if guarded:
 		var dc := Color(Data.MAGENTA.r, Data.MAGENTA.g, Data.MAGENTA.b, 0.5 + sin(t * 3.0) * 0.2)
 		_dashed_ring(visual_radius * 1.55 * pulse, dc)
-		var fs := 18
-		var skull := "☠"
-		var w := font.get_string_size(skull, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-		draw_string(font, Vector2(-w / 2, -visual_radius - 20), skull, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Data.MAGENTA)
+		var lock_text := "🔒  LOCKED"
+		var lock_w := font.get_string_size(lock_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
+		draw_string(font, Vector2(-lock_w / 2, -visual_radius - 30), lock_text,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Data.MAGENTA_SOFT)
+		var guardian_name: String = Data.MINI_BOSS_TYPES.get(guard_type, {"name": "GUARDIAN"}).name
+		var objective := "DEFEAT %s TO UNLOCK" % guardian_name
+		var objective_w := font.get_string_size(objective, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+		draw_string(font, Vector2(-objective_w / 2, -visual_radius - 14), objective,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Data.WHITE)
 
 	match type:
 		"ruins": _draw_ruins(t, visual_radius, pulse)
@@ -58,9 +66,18 @@ func _draw() -> void:
 	# label when close
 	if main and main.player and position.distance_to(main.player.position) < 350:
 		var def: Dictionary = Data.LANDMARK_TYPES[type]
-		var nm: String = def.name
+		var nm: String = ("%s — LOCKED" % def.name) if guarded else def.name
 		var w := font.get_string_size(nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
 		draw_string(font, Vector2(-w / 2, visual_radius + 24), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(color, 0.78))
+		var effect: String
+		if guarded:
+			var guardian_name: String = Data.MINI_BOSS_TYPES.get(guard_type, {"name": "GUARDIAN"}).name
+			effect = "DEFEAT %s TO CLAIM: %s" % [guardian_name, def.effect]
+		else:
+			effect = def.effect
+		var ew := font.get_string_size(effect, HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x
+		draw_string(font, Vector2(-ew / 2, visual_radius + 39), effect,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(Data.WHITE, 0.62))
 
 func _draw_ruins(t: float, r: float, pulse: float) -> void:
 	# Broken orbital relic: asymmetry and missing sections keep it grounded in

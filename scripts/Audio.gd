@@ -135,7 +135,6 @@ func shoot(w: String) -> void:
 func hit() -> void: _play_buf(_tone(220, 0.06, "square", 0.06, -100))
 func kill() -> void:
 	_play_buf(_tone(660, 0.08, "triangle", 0.07, 200)); _play_buf(_noise(0.06, 0.04, 1200))
-func dash() -> void: _play_buf(_noise(0.12, 0.05, 2400))
 func damage() -> void:
 	_play_buf(_tone(110, 0.2, "sawtooth", 0.1, -50)); _play_buf(_noise(0.15, 0.08, 400))
 func rewind() -> void:

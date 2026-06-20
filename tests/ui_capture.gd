@@ -15,7 +15,7 @@ func _initialize() -> void:
 	_capture("C:/tmp/aetherwing_ui_codex.png")
 	game.hud.close_modal()
 	game.start_game()
-	await process_frame
+	await create_timer(3.1).timeout
 	game.toggle_pause()
 	await process_frame
 	_capture("C:/tmp/aetherwing_ui_pause.png")

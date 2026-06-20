@@ -137,6 +137,7 @@ func _base_angle(from: Vector2, projectile_speed: float = 720.0, inherit_factor:
 
 func _spawn_projectile(from: Vector2, angle: float, speed: float, damage: float, size: float,
 		color: Color, inherit_factor: float = 0.65) -> Bullet:
+	main._trim_player_bullets()
 	var b := Bullet.new()
 	b.friendly = true
 	b.position = from
@@ -218,15 +219,30 @@ func _fire_drones(entry: Dictionary) -> void:
 
 func _fire_gravity(entry: Dictionary) -> void:
 	var evolved: bool = entry.evolved == "event_horizon"
-	var b := _spawn_projectile(main.player.position, 0.0, 0.0,
-		40.0 if evolved else _stat(entry, "damage"), 8.0, Data.PURPLE, 0.0)
+	var deploy_dir := Vector2.from_angle(main.player.aim_angle)
+	var target = _target(main.player.position)
+	if target != null:
+		var predicted: Vector2 = target.position
+		if "vel" in target:
+			predicted += target.vel * 0.35
+		var offset: Vector2 = predicted - main.player.position
+		if offset.length() > 12.0:
+			deploy_dir = offset.normalized()
+	var deploy_distance := 210.0 if evolved else 165.0
+	if target != null:
+		deploy_distance = clampf(target.position.distance_to(main.player.position), 110.0, 260.0)
+	var deploy_pos: Vector2 = main.player.position + deploy_dir * deploy_distance
+	var b := _spawn_projectile(deploy_pos, 0.0, 0.0,
+		40.0 if evolved else _stat(entry, "damage"), 10.0, Data.PURPLE, 0.0)
 	b.weapon_id = "gravity"
 	b.is_singularity = true
-	b.singularity_activated = true
+	b.is_gravity_mine = true
+	b.mine_arm_total = 0.25 if evolved else 0.45
+	b.mine_arm_time = b.mine_arm_total
 	b.singularity_radius = (200.0 if evolved else _stat(entry, "radius")) * _passive_mult("area")
 	b.singularity_duration = (6.0 if evolved else _stat(entry, "duration")) * _passive_mult("area")
-	b.singularity_pull = 520.0 if evolved else 220.0
-	b.life = b.singularity_duration
+	b.singularity_pull = 620.0 if evolved else 300.0
+	b.life = b.mine_arm_total + b.singularity_duration + 0.1
 	b.destroys_enemy_bullets = evolved or entry.level >= 5
 	b.detonation_damage = 200.0 if evolved else 50.0
 	b.detonation_radius = 100.0 if evolved else 60.0
@@ -256,7 +272,7 @@ func _fire_satellites(entry: Dictionary) -> void:
 	for i in count:
 		var pos: Vector2 = _orbital_position(i, count)
 		var b := _spawn_projectile(pos, _base_angle(pos, 900.0), 900.0,
-			5.0 if entry.evolved == "aegis" else _stat(entry, "damage"), 3.0, Data.GREEN)
+			5.0 if entry.evolved == "aegis" else _stat(entry, "damage"), 3.0, Data.CYAN_SOFT)
 		b.weapon_id = "shield"
 		if entry.evolved == "aegis": b.pierce = 3
 
@@ -380,7 +396,7 @@ func _update_shields(_dt: float) -> void:
 						var chance: float = 1.0 if entry.evolved == "aegis" else (0.5 if entry.level >= 5 else 0.25)
 						if randf() <= chance:
 							var reflected := _spawn_projectile(sat, (sat - main.player.position).angle(), bullet.vel.length(),
-								bullet.damage if entry.evolved == "aegis" else bullet.damage * 0.5, bullet.size, Data.GREEN)
+								bullet.damage if entry.evolved == "aegis" else bullet.damage * 0.5, bullet.size, Data.CYAN_SOFT)
 							reflected.reflected = true
 					break
 
@@ -511,6 +527,6 @@ func _draw() -> void:
 		var arc := deg_to_rad(180.0 if shield.evolved == "aegis" else float(_stat(shield, "arc", 90.0)))
 		for i in count:
 			var local := _orbital_position(i, count) - position
-			Neon.glow_dot(self, local, 7.0, Data.GREEN)
+			Neon.glow_dot(self, local, 7.0, Data.CYAN_SOFT)
 			var a := local.angle()
-			draw_arc(Vector2.ZERO, 80.0, a - arc * 0.5, a + arc * 0.5, 20, Color(Data.GREEN, 0.65), 2.0)
+			draw_arc(Vector2.ZERO, 80.0, a - arc * 0.5, a + arc * 0.5, 20, Color(Data.CYAN_SOFT, 0.65), 2.0)

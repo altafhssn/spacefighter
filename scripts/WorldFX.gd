@@ -4,13 +4,18 @@ extends Node2D
 
 var main = null
 var font: Font
+var redraw_timer := 0.0
 
 func _ready() -> void:
 	z_index = 50
 	font = ThemeDB.fallback_font
 
-func _process(_dt: float) -> void:
-	queue_redraw()
+func _process(dt: float) -> void:
+	redraw_timer -= dt
+	if redraw_timer <= 0.0 and (main.arena_active or not main.particles.is_empty()
+			or not main.decals.is_empty() or not main.damage_numbers.is_empty()):
+		queue_redraw()
+		redraw_timer = 1.0 / 30.0
 
 func _draw() -> void:
 	if main == null:
@@ -22,7 +27,7 @@ func _draw() -> void:
 		var r: float = main.arena_radius
 		var pulse: float = 0.45 + sin(main.time * 2.5) * 0.18
 		var col := Color(Data.MAGENTA.r, Data.MAGENTA.g, Data.MAGENTA.b, pulse)
-		var segs := 64
+		var segs := 40
 		for i in segs:
 			if i % 2 == 1:
 				continue
@@ -30,7 +35,7 @@ func _draw() -> void:
 			var a1: float = (float(i + 1) / segs) * TAU + main.time * 0.15
 			draw_arc(c, r, a0, a1, 6, col, 3.0)
 		# soft inner edge glow
-		draw_arc(c, r - 4.0, 0, TAU, 96, Color(Data.MAGENTA.r, Data.MAGENTA.g, Data.MAGENTA.b, 0.08), 8.0)
+		draw_arc(c, r - 4.0, 0, TAU, 48, Color(Data.MAGENTA.r, Data.MAGENTA.g, Data.MAGENTA.b, 0.08), 8.0)
 
 	# Decals (under everything else fx)
 	for d in main.decals:

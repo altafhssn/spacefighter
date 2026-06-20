@@ -24,6 +24,12 @@ var enemies: Array = []
 var bullets: Array = []
 var enemy_bullets: Array = []
 var xp_gems: Array = []
+var health_pickups: Array = []
+var enemy_grid := {}
+const ENEMY_GRID_SIZE := 72.0
+const MAX_PLAYER_BULLETS := 180
+const MAX_ENEMY_BULLETS := 220
+const MAX_XP_GEMS := 100
 var particles: Array = []          # {pos, vel, life, max_life, color, size}
 var decals: Array = []             # {pos, size, color, life, max_life}
 var damage_numbers: Array = []     # {pos, vel, text, color, big, life, max_life}
@@ -53,15 +59,38 @@ var snap_timer := 0.0
 var kill_count := 0
 var elite_timer := 0.0
 var boss_timer := 0.0
+var arena_health_timer := 0.0
+var objective_toast_timer := 0.0
 var revive_used := false
+var launch_sequence_id := 0
 var control_mode := "joystick"   # joystick (default) | follow | direct
-var boost_active := false
 var high_score := 0
 
 var upgrades := {}
 var upgrade_stacks := {}
 var pending_level_ups := 0
+var test_ability_timer := 0.0
 var _pending := false   # true while a warning banner is playing before a spawn
+var introduced_enemies := {}
+var enemy_intro_queue: Array[String] = []
+var enemy_intro_resume_scale := 1.0
+
+const ENEMY_INTROS := {
+	"drone": {"name": "DRONE", "icon": "⬡", "color": Data.CYAN,
+		"desc": "A steady pursuer. Keep moving and cut through the swarm before it surrounds you."},
+	"weaver": {"name": "WEAVER", "icon": "⌁", "color": Data.CYAN_SOFT,
+		"desc": "A small zigzag attacker. Its lateral movement makes straight-line weapons less reliable."},
+	"skimmer": {"name": "SKIMMER", "icon": "➤", "color": Data.PURPLE,
+		"desc": "A ranged flanker. It circles at medium range and fires into your escape routes."},
+	"diver": {"name": "DIVER", "icon": "▼", "color": Data.MAGENTA,
+		"desc": "A red strike craft. It locks onto your position, commits to a fast charge, then turns for another pass."},
+	"bulwark": {"name": "BULWARK", "icon": "■", "color": Data.AMBER,
+		"desc": "An armored blocker. Attack while its forward shield retracts or hit it from behind."},
+	"lancer": {"name": "LANCER", "icon": "◇", "color": Data.GOLD,
+		"desc": "A precision sniper. Move away from its targeting line before the charged shot fires."},
+}
+
+const TEST_ABILITY_DURATION := 30.0
 
 func _announce_then(text: String, color: Color, cb: Callable) -> void:
 	_pending = true
@@ -108,8 +137,11 @@ var swipe_start_ms := 0
 
 # --- virtual joystick ---
 const JOY_RADIUS := 72.0
-const JOY_DEADZONE := 8.0
-const JOY_MAX_SPEED := 470.0
+const JOY_DEADZONE := 6.0
+const JOY_MAX_SPEED := 520.0
+const MOVE_ACCEL := 12.0
+const MOVE_BRAKE := 18.0
+const FOLLOW_MAX_SPEED := 620.0
 var joy_active := false
 var joy_origin: Vector2 = Vector2.ZERO
 var joy_vec: Vector2 = Vector2.ZERO    # clamped knob offset (screen px)
@@ -118,6 +150,7 @@ var joy_mag := 0.0                      # 0..1 push amount
 
 # preloads
 const PlayerScript = preload("res://scripts/Player.gd")
+const HealthPickupScript = preload("res://scripts/HealthPickup.gd")
 const BossCatalogScript = preload("res://scripts/BossCatalog.gd")
 const CodexBossScript = preload("res://scripts/CodexBoss.gd")
 
@@ -275,7 +308,6 @@ func enemy_speed_mult() -> float: return 1.15 if current_weekly == "speed" else 
 func player_speed_mult() -> float: return 1.2 if current_weekly == "speed" else 1.0
 func score_mult() -> float: return 2.0 if current_weekly == "greed" else 1.0
 func greed_hp_penalty() -> int: return 1 if current_weekly == "greed" else 0
-func boost_drain_mult() -> float: return 0.5 if current_weekly == "explorer" else 1.0
 func landmark_spawn_mult() -> float: return 0.85 if current_weekly == "explorer" else 0.6
 
 # ------------------------------------------------------------
@@ -354,8 +386,11 @@ func update_landmarks(dt: float) -> void:
 			# a guarded landmark stays locked until its guardian is defeated
 			# (defeat clears `guarded`), so it can't be grabbed during the warning
 			if lm.guarded:
-				if lm.guard_triggered:
-					hud.toast("DEFEAT THE GUARDIAN", "warning")
+				if lm.guard_triggered and objective_toast_timer <= 0.0:
+					var guardian_name: String = Data.MINI_BOSS_TYPES.get(
+						lm.guard_type, {"name": "GUARDIAN"}).name
+					hud.toast("LOCKED — DEFEAT %s" % guardian_name, "warning")
+					objective_toast_timer = 2.5
 				continue
 			lm.visited = true
 			apply_landmark_effect(lm)
@@ -378,7 +413,7 @@ func apply_landmark_effect(lm) -> void:
 					granted += 1
 			hud.toast("%d UPGRADE(S) ACQUIRED" % granted, "gold")
 		"station":
-			player.hp = player.max_hp
+			heal_player(player.max_hp, "FULL REPAIR")
 			player.echo_meter = Data.ECHO.meter_max
 			if current_modifier == "station":
 				player.shield_timer = 15.0
@@ -391,7 +426,7 @@ func apply_landmark_effect(lm) -> void:
 			hud.toast("%dx XP FOR 30s" % int(xp_mult), "green")
 		"beacon":
 			beacon_timer = 120.0 if current_modifier == "beacon" else 60.0
-			hud.toast("RADAR EXPANDED %ds" % int(beacon_timer), "green")
+			hud.toast("RADAR RANGE +50%% FOR %ds" % int(beacon_timer), "green")
 	hud.toast(def.name + " CLAIMED", "gold")
 
 func get_active_landmarks() -> Array:
@@ -420,8 +455,11 @@ func spawn_world_boss(type: String, pos: Vector2, landmark_key: String) -> void:
 	b.z_index = 16
 	world.add_child(b)
 	world_boss = b
-	hud.show_world_boss_bar(def.name, def.color)
-	hud.toast(def.name + " AWAKENED", "warning")
+	var objective_name := "LANDMARK"
+	if landmark_cache.has(landmark_key) and landmark_cache[landmark_key] != null:
+		objective_name = Data.LANDMARK_TYPES[landmark_cache[landmark_key].type].name
+	hud.show_world_boss_bar("%s — GUARDING %s" % [def.name, objective_name], def.color)
+	hud.toast("LOCKED: DEFEAT %s TO CLAIM %s" % [def.name, objective_name], "warning")
 	Audio.boss_warn()
 
 func damage_world_boss(amount: float) -> void:
@@ -466,10 +504,10 @@ func defeat_world_boss() -> void:
 # ------------------------------------------------------------
 func new_game() -> void:
 	# clear entities
-	for arr in [enemies, bullets, enemy_bullets, xp_gems]:
+	for arr in [enemies, bullets, enemy_bullets, xp_gems, health_pickups]:
 		for e in arr:
 			if is_instance_valid(e): e.queue_free()
-	enemies.clear(); bullets.clear(); enemy_bullets.clear(); xp_gems.clear()
+	enemies.clear(); bullets.clear(); enemy_bullets.clear(); xp_gems.clear(); health_pickups.clear()
 	particles.clear(); decals.clear(); damage_numbers.clear()
 	if boss and is_instance_valid(boss): boss.queue_free()
 	boss = null
@@ -494,15 +532,18 @@ func new_game() -> void:
 	screen_shake = 0.0; zoom_pulse = 1.0
 	rewind_snapshots.clear(); rewind_active = false; rewind_timer = 0.0; snap_timer = 0.0
 	kill_count = 0; elite_timer = 0.0; boss_timer = 0.0; revive_used = false
-	boost_active = false
+	arena_health_timer = 0.0
+	introduced_enemies.clear()
+	enemy_intro_queue.clear()
 
 	upgrades = {
 		"damage": 0.0, "fireRate": 0.0, "multishot": 0, "pierce": 0, "bulletSpeed": 0.0,
-		"dashCd": 0.0, "echoGain": 0.0, "critChance": 0.0, "magnet": 0.0, "moveSpeed": 0.0,
-		"echoDuration": 0.0, "lifesteal": 0.0, "effBoost": 0.0, "overdrive": 0.0,
+		"echoGain": 0.0, "critChance": 0.0, "magnet": 0.0, "moveSpeed": 0.0,
+		"echoDuration": 0.0, "lifesteal": 0.0,
 	}
 	upgrade_stacks = {}
 	pending_level_ups = 0
+	test_ability_timer = 0.0
 
 	player = PlayerScript.new()
 	player.position = Vector2.ZERO
@@ -526,13 +567,23 @@ func new_game() -> void:
 	if hud:
 		hud.hide_boss_bar()
 		hud.hide_world_boss_bar()
+		hud.hide_enemy_intro()
 		hud.set_echo_overlay(false)
 
 func start_game() -> void:
 	new_game()
-	state = "playing"
+	launch_sequence_id += 1
+	var sequence := launch_sequence_id
+	state = "launching"
 	hud.hide_overlays()
 	hud.update_weapon()
+	for count in [3, 2, 1]:
+		hud.show_launch_countdown(str(count))
+		await get_tree().create_timer(1.0).timeout
+		if state != "launching" or sequence != launch_sequence_id:
+			return
+	hud.show_launch_countdown("LAUNCH")
+	state = "playing"
 	Audio.start_music(func(): return combo)
 	start_wave(1)
 
@@ -540,7 +591,7 @@ func restart() -> void:
 	start_game()
 
 func return_to_base() -> void:
-	boost_active = false
+	launch_sequence_id += 1
 	dragging = false
 	joy_active = false
 	joy_dir = Vector2.ZERO
@@ -552,7 +603,6 @@ func return_to_base() -> void:
 func toggle_pause() -> void:
 	if state == "playing":
 		state = "paused"
-		boost_active = false
 		dragging = false
 		joy_active = false
 		joy_dir = Vector2.ZERO
@@ -603,7 +653,8 @@ func choose_upgrade(up: Dictionary) -> void:
 		_grant_upgrade(up.id)
 	hud.hide_levelup()
 	hud.update_weapon()
-	hud.toast(up.name + " ACQUIRED", "green")
+	test_ability_timer = TEST_ABILITY_DURATION
+	hud.toast("%s — TEST 30s" % up.name, "gold")
 	if pending_level_ups > 0:
 		trigger_level_up()
 	else:
@@ -628,8 +679,8 @@ func _apply_upgrade(id: String) -> void:
 		"pierce": upgrades.pierce = min(5, upgrades.pierce + 1)
 		"bulletspeed": upgrades.bulletSpeed = min(1.2, upgrades.bulletSpeed + 0.30)
 		"maxhp":
-			player.max_hp += 1; player.hp = player.max_hp
-		"dashcd": upgrades.dashCd = max(-0.75, upgrades.dashCd - 0.25)
+			player.max_hp += 1
+			heal_player(player.max_hp, "HULL EXPANDED")
 		"echogain": upgrades.echoGain = min(2.0, upgrades.echoGain + 0.50)
 		"critchance": upgrades.critChance = min(0.60, upgrades.critChance + 0.15)
 		"magnet": upgrades.magnet = min(1.6, upgrades.magnet + 0.40)
@@ -637,8 +688,22 @@ func _apply_upgrade(id: String) -> void:
 		"rewind": player.rewind_charges += 1
 		"echoduration": upgrades.echoDuration = min(4.5, upgrades.echoDuration + 1.5)
 		"lifesteal": upgrades.lifesteal = min(0.20, upgrades.lifesteal + 0.05)
-		"effboost": upgrades.effBoost = min(0.80, upgrades.effBoost + 0.20)
-		"overdrive": upgrades.overdrive = min(0.90, upgrades.overdrive + 0.30)
+
+func _expire_test_abilities() -> void:
+	test_ability_timer = 0.0
+	upgrades = {
+		"damage": 0.0, "fireRate": 0.0, "multishot": 0, "pierce": 0, "bulletSpeed": 0.0,
+		"echoGain": 0.0, "critChance": 0.0, "magnet": 0.0, "moveSpeed": 0.0,
+		"echoDuration": 0.0, "lifesteal": 0.0,
+	}
+	upgrade_stacks.clear()
+	player.max_hp = Data.PLAYER.max_hp - greed_hp_penalty()
+	player.hp = mini(player.hp, player.max_hp)
+	player.rewind_charges = mini(player.rewind_charges, Data.ECHO.rewind_charges)
+	if weapon_system:
+		weapon_system.reset_run()
+		hud.update_weapon()
+	hud.toast("TEST ABILITIES EXPIRED", "warning")
 
 # ------------------------------------------------------------
 # MAIN LOOP
@@ -668,6 +733,7 @@ func update(raw_dt: float) -> void:
 		return
 	var dt := raw_dt * time_scale
 	time += dt
+	objective_toast_timer = maxf(0.0, objective_toast_timer - raw_dt)
 	player.time = time
 	zoom_pulse += (1.0 - zoom_pulse) * 0.15
 
@@ -684,7 +750,10 @@ func update(raw_dt: float) -> void:
 
 	_update_movement(raw_dt, dt)
 	weapon_system.update(dt)
-	update_boost(raw_dt)
+	if test_ability_timer > 0.0:
+		test_ability_timer -= raw_dt
+		if test_ability_timer <= 0.0:
+			_expire_test_abilities()
 
 	if combo > 1:
 		combo_timer -= raw_dt
@@ -709,6 +778,7 @@ func update(raw_dt: float) -> void:
 		wave_transition = -1.0
 
 	# entities
+	_rebuild_enemy_grid()
 	for e in enemies: e.update(dt)
 	if boss: boss.update(dt)
 	if world_boss: world_boss.update(dt)
@@ -717,6 +787,7 @@ func update(raw_dt: float) -> void:
 	_update_bullets(dt)
 	_update_enemy_bullets(dt)
 	update_xp_gems(dt)
+	update_health_pickups(dt)
 	update_particles(raw_dt)
 	check_collisions()
 
@@ -760,33 +831,60 @@ func _cull(arr: Array, _pp: Vector2) -> void:
 			keep.append(e)
 	arr.assign(keep)
 
+func _enemy_cell(pos: Vector2) -> Vector2i:
+	return Vector2i(floori(pos.x / ENEMY_GRID_SIZE), floori(pos.y / ENEMY_GRID_SIZE))
+
+func _rebuild_enemy_grid() -> void:
+	enemy_grid.clear()
+	for enemy in enemies:
+		if enemy.remove:
+			continue
+		var cell := _enemy_cell(enemy.position)
+		if not enemy_grid.has(cell):
+			enemy_grid[cell] = []
+		enemy_grid[cell].append(enemy)
+
+func nearby_enemies(pos: Vector2, radius := ENEMY_GRID_SIZE) -> Array:
+	var result: Array = []
+	var center := _enemy_cell(pos)
+	var safe_radius := clampf(radius, ENEMY_GRID_SIZE, ENEMY_GRID_SIZE * 8.0)
+	var reach := clampi(ceili(safe_radius / ENEMY_GRID_SIZE), 1, 8)
+	for x in range(center.x - reach, center.x + reach + 1):
+		for y in range(center.y - reach, center.y + reach + 1):
+			var cell := Vector2i(x, y)
+			if enemy_grid.has(cell):
+				result.append_array(enemy_grid[cell])
+	return result
+
 # ------------------------------------------------------------
 # MOVEMENT
 # ------------------------------------------------------------
 func _update_movement(raw_dt: float, _dt: float) -> void:
 	var p := player
-	var move_mult: float = (1.0 + upgrades.moveSpeed) * get_boost_mult() * player_speed_mult()
+	var move_mult: float = (1.0 + upgrades.moveSpeed) * player_speed_mult()
 	if weapon_system:
 		move_mult *= weapon_system.movement_multiplier()
-	var prev := p.position
+	var desired_velocity := Vector2.ZERO
 
 	if control_mode == "joystick":
-		# analog steering: velocity proportional to stick push
-		p.position += joy_dir * JOY_MAX_SPEED * move_mult * joy_mag * raw_dt
+		# Curved analog response gives precision near center without sacrificing
+		# full-speed movement at the edge.
+		var response := joy_mag * joy_mag * (3.0 - 2.0 * joy_mag)
+		desired_velocity = joy_dir * JOY_MAX_SPEED * move_mult * response
 		p.target = p.position
 	else:
 		var d := p.target - p.position
-		var base_rate: float = Data.PLAYER.follow_speed * move_mult
-		var capped: float = min(base_rate, 0.92)
-		var follow_factor: float
-		if control_mode == "direct":
-			follow_factor = get_boost_mult()
-		else:
-			follow_factor = 1.0 - pow(1.0 - capped, raw_dt * 60.0)
-		p.position += d * follow_factor
+		if d.length() > 1.0:
+			var chase_gain := 12.0 if control_mode == "direct" else 7.0
+			desired_velocity = d.limit_length(FOLLOW_MAX_SPEED * move_mult) * chase_gain
+			desired_velocity = desired_velocity.limit_length(FOLLOW_MAX_SPEED * move_mult)
 
-	var raw_v: Vector2 = (p.position - prev) / max(0.001, raw_dt)
-	p.vel = p.vel * 0.75 + raw_v * 0.25
+	var response_rate := MOVE_BRAKE if desired_velocity.length_squared() < p.vel.length_squared() else MOVE_ACCEL
+	var response_factor := 1.0 - exp(-response_rate * raw_dt)
+	p.vel = p.vel.lerp(desired_velocity, response_factor)
+	if desired_velocity == Vector2.ZERO and p.vel.length() < 4.0:
+		p.vel = Vector2.ZERO
+	p.position += p.vel * raw_dt
 
 	# banking
 	var target_bank: float = clamp(-p.vel.x * 0.0012, -Data.PLAYER.max_bank, Data.PLAYER.max_bank)
@@ -807,13 +905,6 @@ func _update_movement(raw_dt: float, _dt: float) -> void:
 	for t in p.engine_trail: t.life -= raw_dt
 	p.engine_trail = p.engine_trail.filter(func(t): return t.life > 0)
 
-	# dash
-	if p.dash_timer > 0:
-		p.dash_timer -= raw_dt
-		p.position += p.dash_dir * (Data.PLAYER.dash_distance / Data.PLAYER.dash_duration) * raw_dt
-		if randf() < 0.8:
-			spawn_particles(p.position, Data.CYAN, 1, 3.0)
-	if p.dash_cooldown > 0: p.dash_cooldown -= raw_dt
 	if p.invuln > 0: p.invuln -= raw_dt
 	if p.shield_timer > 0: p.shield_timer -= raw_dt
 
@@ -823,6 +914,7 @@ func _update_movement(raw_dt: float, _dt: float) -> void:
 		if off.length() > arena_radius:
 			p.position = arena_center + off.normalized() * arena_radius
 			p.target = p.position
+			p.vel = p.vel.slide(off.normalized()) * 0.35
 			joy_mag = 0.0
 
 func _nearest_target(from: Vector2):
@@ -887,12 +979,14 @@ func _fire_weapon(w: Dictionary) -> void:
 			b.singularity_pull = w.singularity_pull
 
 func fire_bullet(ang: float, w: Dictionary) -> Bullet:
+	_trim_player_bullets()
 	var dmg_mult: float = 1.0 + upgrades.damage
 	var spd_mult: float = 1.0 + upgrades.bulletSpeed
 	var b := Bullet.new()
 	b.is_critical = randf() < clampf(upgrades.critChance, 0.0, 0.60)
 	b.friendly = true
 	b.position = player.position + Vector2(0, -Data.PLAYER.size)
+	b.prev_position = b.position
 	b.vel = Vector2(cos(ang), sin(ang)) * w.bullet_speed * spd_mult
 	b.size = w.bullet_size
 	b.damage = w.damage * dmg_mult * (3.0 if b.is_critical else 1.0)
@@ -903,6 +997,12 @@ func fire_bullet(ang: float, w: Dictionary) -> Bullet:
 	world.add_child(b)
 	bullets.append(b)
 	return b
+
+func _trim_player_bullets() -> void:
+	while bullets.size() >= MAX_PLAYER_BULLETS:
+		var oldest = bullets.pop_front()
+		if is_instance_valid(oldest):
+			oldest.queue_free()
 
 # ------------------------------------------------------------
 # BULLET SIM
@@ -922,6 +1022,18 @@ func _update_bullets(dt: float) -> void:
 				var turn: float = clampf(wrapf(desired - current, -PI, PI),
 					-b.homing_turn_rate * dt, b.homing_turn_rate * dt)
 				b.vel = Vector2.from_angle(current + turn) * b.vel.length()
+		if b.is_gravity_mine and not b.singularity_activated:
+			b.mine_arm_time -= dt
+			b.life -= dt
+			if b.mine_arm_time <= 0.0:
+				_activate_singularity(b, false)
+				screen_shake = maxf(screen_shake, 0.12)
+			b.queue_redraw()
+			if b.life > 0.0:
+				keep.append(b)
+			else:
+				b.queue_free()
+			continue
 		if b.is_ring:
 			b.ring_radius = min(b.ring_max_radius, b.ring_radius + b.ring_speed * dt)
 			b.life -= dt
@@ -954,9 +1066,7 @@ func _update_bullets(dt: float) -> void:
 					var pull: Vector2 = (b.position - e.position).normalized()
 					var force: float = (1.0 - ed / b.singularity_radius) * b.singularity_pull
 					e.position += pull * force * dt
-					e.hp -= b.damage * dt
-					e.hit_flash = 0.05
-					if e.hp <= 0: kill_enemy(e, b.is_critical)
+					_damage_enemy(e, b.damage * dt, b)
 			if boss and boss.phase > 0:
 				var bd: float = boss.position.distance_to(b.position)
 				if bd < b.singularity_radius:
@@ -984,7 +1094,7 @@ func _update_bullets(dt: float) -> void:
 				b.life = 0
 		else:
 			b.trail.append(b.position)
-			if b.trail.size() > 6: b.trail.pop_front()
+			if b.trail.size() > 3: b.trail.pop_front()
 			b.position += b.vel * dt
 			b.life -= dt
 			if b.position.distance_to(pp) > Data.CULL_DISTANCE: b.life = 0
@@ -1002,7 +1112,6 @@ func _update_enemy_bullets(dt: float) -> void:
 		b.set_time(time)
 		b.position += b.vel * dt
 		b.life -= dt
-		b.queue_redraw()
 		if b.life > 0 and not b.hit and b.position.distance_to(pp) <= Data.CULL_DISTANCE:
 			keep.append(b)
 		else:
@@ -1016,6 +1125,7 @@ func check_collisions() -> void:
 	var p := player
 	for b in bullets:
 		if b.hit or b.singularity_activated: continue
+		if b.is_gravity_mine: continue
 		# boss
 		if boss and boss.phase > 0 and not b.pierce_hits.has(boss):
 			if _bullet_hits(b, boss.position, boss.size + b.size):
@@ -1119,12 +1229,13 @@ func _bullet_hits(b: Bullet, target_pos: Vector2, hit_radius: float) -> bool:
 # ------------------------------------------------------------
 # KILL / DAMAGE
 # ------------------------------------------------------------
-func _activate_singularity(b: Bullet) -> void:
+func _activate_singularity(b: Bullet, announce := true) -> void:
 	b.singularity_activated = true
 	b.vel = Vector2.ZERO
 	b.life = b.singularity_duration + 0.1
 	spawn_particles(b.position, Data.PURPLE, 30, 6.0)
-	hud.toast("SINGULARITY ACTIVE", "green")
+	if announce:
+		hud.toast("SINGULARITY ACTIVE", "green")
 
 func _damage_enemy(e: Enemy, amount: float, source: Bullet = null) -> void:
 	if e.remove:
@@ -1187,10 +1298,19 @@ func kill_enemy(e: Enemy, is_crit := false) -> void:
 	var elite_xp_mult := 2.0 if current_modifier == "hunt" and e.is_elite else 1.0
 	spawn_xp_gem(e.position, int(round(e.xp_value * enemy_xp_mult() * elite_xp_mult)))
 	if upgrades.lifesteal > 0 and randf() < upgrades.lifesteal:
-		if player.hp < player.max_hp:
-			player.hp += 1
-			spawn_particles(player.position, Data.GREEN, 8, 2.0)
-			hud.toast("+1 HP", "green")
+		heal_player(1, "LIFESTEAL")
+
+func heal_player(amount: int, source := "HEALED") -> int:
+	var before := player.hp
+	player.hp = mini(player.max_hp, player.hp + amount)
+	var restored := player.hp - before
+	hud.flash_heal()
+	spawn_particles(player.position, Data.GREEN, 22, 4.0)
+	spawn_particles(player.position, Data.WHITE, 8, 2.0)
+	if restored > 0:
+		spawn_damage_number(player.position + Vector2(0, -24), "+%d HP" % restored, Data.GREEN, true)
+		hud.toast("%s  +%d HP" % [source, restored])
+	return restored
 
 func damage_player(amount: int = 1) -> void:
 	var p := player
@@ -1198,8 +1318,8 @@ func damage_player(amount: int = 1) -> void:
 	if p.shield_timer > 0:
 		p.shield_timer = 0.0
 		p.invuln = 1.2
-		spawn_particles(p.position, Data.GREEN, 16, 4.0)
-		hud.toast("SHIELD ABSORBED", "green")
+		spawn_particles(p.position, Data.CYAN_SOFT, 16, 4.0)
+		hud.toast("SHIELD ABSORBED")
 		return
 	p.hp -= amount
 	p.invuln = 1.2
@@ -1314,19 +1434,28 @@ func generate_wave_pattern(w: int) -> Array:
 	var count: int = min(80, int(round((15 + w * 4) * wave_count_mult())))
 	if w % 5 == 0:
 		patterns.append({"type": "line", "count": 10, "enemy": "drone"})
-	elif w < 3:
+	elif w == 1:
 		patterns.append({"type": "random", "count": count, "enemy": "drone"})
+	elif w == 2:
+		patterns.append({"type": "random", "count": int(count * 0.65), "enemy": "drone"})
+		patterns.append({"type": "vortex", "count": int(count * 0.35), "enemy": "weaver"})
 	elif w < 6:
-		patterns.append({"type": "random", "count": int(count * 0.6), "enemy": "drone"})
-		patterns.append({"type": "line", "count": int(count * 0.4), "enemy": "diver"})
+		patterns.append({"type": "random", "count": int(count * 0.4), "enemy": "drone"})
+		patterns.append({"type": "vortex", "count": int(count * 0.25), "enemy": "weaver"})
+		patterns.append({"type": "circle", "count": int(count * 0.2), "enemy": "skimmer"})
+		patterns.append({"type": "line", "count": int(count * 0.15), "enemy": "diver"})
 	elif w < 10:
-		patterns.append({"type": "circle", "count": int(count * 0.5), "enemy": "drone"})
-		patterns.append({"type": "line", "count": int(count * 0.3), "enemy": "lancer"})
-		patterns.append({"type": "random", "count": int(count * 0.2), "enemy": "diver"})
+		patterns.append({"type": "vortex", "count": int(count * 0.3), "enemy": "weaver"})
+		patterns.append({"type": "circle", "count": int(count * 0.25), "enemy": "skimmer"})
+		patterns.append({"type": "random", "count": int(count * 0.2), "enemy": "drone"})
+		patterns.append({"type": "line", "count": int(count * 0.15), "enemy": "lancer"})
+		patterns.append({"type": "random", "count": int(count * 0.1), "enemy": "diver"})
 	else:
-		patterns.append({"type": "vortex", "count": int(count * 0.4), "enemy": "drone"})
-		patterns.append({"type": "cross", "count": int(count * 0.3), "enemy": "diver"})
-		patterns.append({"type": "circle", "count": int(count * 0.3), "enemy": "bulwark"})
+		patterns.append({"type": "vortex", "count": int(count * 0.25), "enemy": "weaver"})
+		patterns.append({"type": "circle", "count": int(count * 0.2), "enemy": "skimmer"})
+		patterns.append({"type": "random", "count": int(count * 0.15), "enemy": "drone"})
+		patterns.append({"type": "cross", "count": int(count * 0.2), "enemy": "diver"})
+		patterns.append({"type": "circle", "count": int(count * 0.2), "enemy": "bulwark"})
 	return patterns
 
 func spawn_wave_pattern(pat: Dictionary, base_time: float) -> float:
@@ -1392,6 +1521,12 @@ func spawn_enemy(type: String, pos: Vector2) -> Enemy:
 	match type:
 		"drone":
 			e.behavior = "drift"; e.drift_angle = randf() * TAU
+		"weaver":
+			e.behavior = "weave"; e.weave_phase = randf() * TAU
+		"skimmer":
+			e.behavior = "strafe"; e.orbit_dir = -1.0 if randf() < 0.5 else 1.0
+			e.preferred_range = randf_range(175.0, 245.0)
+			e.fire_timer = randf_range(0.8, 1.8)
 		"diver":
 			e.behavior = "dive"; e.state = "aiming"; e.aim_time = 0.9; e.dive_speed = 400.0
 		"bulwark":
@@ -1401,7 +1536,38 @@ func spawn_enemy(type: String, pos: Vector2) -> Enemy:
 	e.z_index = 10
 	world.add_child(e)
 	enemies.append(e)
+	request_enemy_intro(type)
 	return e
+
+func request_enemy_intro(type: String) -> void:
+	if not ENEMY_INTROS.has(type) or introduced_enemies.has(type):
+		return
+	introduced_enemies[type] = true
+	enemy_intro_queue.append(type)
+	if state == "playing":
+		_show_next_enemy_intro()
+
+func _show_next_enemy_intro() -> void:
+	if enemy_intro_queue.is_empty():
+		return
+	var type: String = enemy_intro_queue.pop_front()
+	var info: Dictionary = ENEMY_INTROS[type]
+	if state != "enemy_intro":
+		enemy_intro_resume_scale = time_scale
+	state = "enemy_intro"
+	time_scale = 0.0
+	dragging = false
+	joy_active = false
+	joy_mag = 0.0
+	hud.show_enemy_intro(info.name, info.icon, info.desc, info.color)
+
+func dismiss_enemy_intro() -> void:
+	hud.hide_enemy_intro()
+	if not enemy_intro_queue.is_empty():
+		_show_next_enemy_intro()
+		return
+	state = "playing"
+	time_scale = enemy_intro_resume_scale
 
 func spawn_enemy_at(type: String, pos: Vector2) -> void:
 	spawn_enemy(type, pos)
@@ -1420,7 +1586,7 @@ func spawn_spiral_drone(pos: Vector2, ang: float) -> void:
 	enemies.append(e)
 
 func spawn_elite() -> void:
-	var types := ["drone", "diver", "bulwark", "lancer"]
+	var types := ["drone", "weaver", "skimmer", "diver", "bulwark", "lancer"]
 	var type: String = types[randi() % types.size()]
 	var diag := view_size.length()
 	var ang := randf() * TAU
@@ -1433,12 +1599,22 @@ func spawn_elite() -> void:
 	hud.toast("ELITE INBOUND", "warning")
 
 func spawn_enemy_bullet(pos: Vector2, vel: Vector2, size: float, color: Color, damage: int, life: float) -> void:
+	while enemy_bullets.size() >= MAX_ENEMY_BULLETS:
+		var oldest = enemy_bullets.pop_front()
+		if is_instance_valid(oldest):
+			oldest.queue_free()
 	var b := Bullet.new()
 	b.friendly = false
 	b.position = pos
 	b.vel = vel
-	b.size = size
-	b.color = color
+	var hostile_color := color
+	var hostile_size := size
+	if color.is_equal_approx(Data.PURPLE) or color.is_equal_approx(Data.MAGENTA) \
+			or color.is_equal_approx(Data.MAGENTA_SOFT):
+		hostile_color = Data.AMBER_SOFT
+		hostile_size = maxf(8.0, size * 1.6)
+	b.size = hostile_size
+	b.color = hostile_color
 	b.damage = damage
 	b.life = life
 	b.z_index = 12
@@ -1471,6 +1647,7 @@ func spawn_codex_boss(id: String) -> void:
 	b.z_index = 18
 	world.add_child(b)
 	boss = b
+	_open_arena()
 	hud.show_boss_bar(b.boss_name)
 	hud.toast("WARNING: %s INBOUND" % b.boss_name, "warning")
 	Audio.boss_warn()
@@ -1506,8 +1683,9 @@ func spawn_spiral() -> void:
 func _open_arena() -> void:
 	arena_active = true
 	arena_center = player.position
-	# 3x the original 0.42 — a much roomier dodge space
-	arena_radius = min(view_size.x, view_size.y) * 1.26
+	# 1.5x the previous arena size.
+	arena_radius = min(view_size.x, view_size.y) * 1.89
+	arena_health_timer = randf_range(7.0, 12.0)
 
 func damage_boss(amount: float, source: Bullet = null) -> void:
 	if boss == null or boss.phase == 0: return
@@ -1546,18 +1724,27 @@ func defeat_boss(grant_reward := true) -> void:
 			var r := 16.0 + randf() * 110.0
 			spawn_xp_gem(defeated.position + Vector2(cos(ang), sin(ang)) * r, 4)
 		# top off the player as a reward
-		if player.hp < player.max_hp:
-			player.hp += 1
-		hud.toast("LOOT RECOVERED", "green")
+		heal_player(1, "LOOT RECOVERED")
 	defeated.queue_free()
 	boss = null
 	boss_timer = 0.0
 	arena_active = false
+	for pickup in health_pickups:
+		if is_instance_valid(pickup):
+			pickup.queue_free()
+	health_pickups.clear()
 
 # ------------------------------------------------------------
 # XP GEMS / PICKUPS
 # ------------------------------------------------------------
 func spawn_xp_gem(pos: Vector2, value: int) -> void:
+	if xp_gems.size() >= MAX_XP_GEMS:
+		var oldest = xp_gems[0]
+		if is_instance_valid(oldest):
+			oldest.value += value
+			oldest.size = minf(12.0, 5.0 + sqrt(float(oldest.value)))
+			oldest.life = 12.0
+		return
 	var g := XpGem.new()
 	g.position = pos
 	g.vel = Vector2((randf() - 0.5) * 40.0, -30.0 - randf() * 30.0)
@@ -1595,12 +1782,50 @@ func update_xp_gems(dt: float) -> void:
 			keep.append(g)
 	xp_gems = keep
 
+func spawn_health_pickup() -> void:
+	if not arena_active or health_pickups.size() >= 2:
+		return
+	var angle := randf() * TAU
+	var max_spawn_radius := minf(arena_radius * 0.7, view_size.y * 0.34)
+	var radius := randf_range(120.0, max_spawn_radius)
+	var pickup = HealthPickupScript.new()
+	pickup.position = arena_center + Vector2.from_angle(angle) * radius
+	pickup.z_index = 11
+	world.add_child(pickup)
+	health_pickups.append(pickup)
+	spawn_particles(pickup.position, Data.GREEN, 18, 3.0)
+	hud.toast("REPAIR SIGNAL DETECTED")
+
+func update_health_pickups(dt: float) -> void:
+	if arena_active and boss:
+		arena_health_timer -= dt
+		if arena_health_timer <= 0.0:
+			spawn_health_pickup()
+			arena_health_timer = randf_range(12.0, 20.0)
+	var keep: Array = []
+	for pickup in health_pickups:
+		pickup.life -= dt
+		if pickup.position.distance_to(player.position) < Data.PLAYER.size + pickup.size:
+			if player.hp < player.max_hp:
+				heal_player(pickup.value, "REPAIR PICKUP")
+				spawn_particles(pickup.position, Data.GREEN, 30, 5.0)
+				pickup.queue_free()
+				continue
+		if pickup.life > 0.0 and arena_active:
+			keep.append(pickup)
+		else:
+			pickup.queue_free()
+	health_pickups.assign(keep)
+
 # ------------------------------------------------------------
 # PARTICLES / FX
 # ------------------------------------------------------------
 func spawn_particles(pos: Vector2, color: Color, count: int, size_base := 2.0) -> void:
-	for i in count:
-		if particles.size() > 250: break
+	var available := 150 - particles.size()
+	var actual_count := mini(count, maxi(0, available))
+	if actual_count <= 0:
+		return
+	for i in actual_count:
 		var ang := randf() * TAU
 		var spd := 40.0 + randf() * 160.0
 		particles.append({
@@ -1640,25 +1865,7 @@ func update_particles(dt: float) -> void:
 	damage_numbers = nk
 
 # ------------------------------------------------------------
-# BOOST
-# ------------------------------------------------------------
-func get_boost_mult() -> float:
-	if boost_active and player.echo_meter >= Data.BOOST.min_echo_to_start:
-		return Data.BOOST.mult * (1.0 + upgrades.overdrive)
-	return 1.0
-
-func update_boost(raw_dt: float) -> void:
-	if boost_active and player.echo_meter > 0:
-		var drain: float = Data.BOOST.drain_rate * max(0.20, 1.0 - upgrades.effBoost) * boost_drain_mult()
-		player.echo_meter = max(0.0, player.echo_meter - drain * raw_dt)
-		if randf() < 0.5:
-			spawn_particles(player.position, Data.CYAN, 1, 2.0)
-
-func set_boost(on: bool) -> void:
-	boost_active = on
-
-# ------------------------------------------------------------
-# WEAPONS / DASH
+# WEAPONS
 # ------------------------------------------------------------
 func cycle_weapon() -> void:
 	player.weapon_idx = (player.weapon_idx + 1) % max(1, weapon_system.weapons.size())
@@ -1666,29 +1873,6 @@ func cycle_weapon() -> void:
 	Audio.weapon_swap()
 	var entry: Dictionary = weapon_system.weapons[player.weapon_idx]
 	hud.toast(Data.SURVIVOR_WEAPONS[entry.id].name + " FOCUSED", "green")
-
-func trigger_dash() -> void:
-	var p := player
-	if p.dash_cooldown > 0: return
-	var dir: Vector2
-	if control_mode == "joystick" and joy_dir != Vector2.ZERO:
-		dir = joy_dir
-	elif p.vel.length() > 20.0:
-		dir = p.vel.normalized()
-	else:
-		dir = p.target - p.position
-	if dir.length() < 0.1: dir = Vector2(0, -1)
-	dir = dir.normalized()
-	p.dash_timer = Data.PLAYER.dash_duration
-	p.dash_cooldown = Data.PLAYER.dash_cooldown * max(0.25, 1.0 + upgrades.dashCd)
-	p.invuln = max(p.invuln, Data.PLAYER.iframe_duration)
-	p.dash_dir = dir
-	Audio.dash()
-	for i in 18:
-		particles.append({
-			"pos": p.position,
-			"vel": -dir * 110.0 + Vector2(randf_range(-45, 45), randf_range(-45, 45)),
-			"life": 0.5, "max_life": 0.5, "color": Data.CYAN, "size": 2.0 + randf() * 2.0})
 
 # ------------------------------------------------------------
 # INPUT
@@ -1702,8 +1886,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventScreenTouch:
 		if event.pressed:
-			# claim the first free finger; a second finger (e.g. BOOST button) is
-			# handled by the GUI and won't reach here, so steering + boost coexist
+			# Claim the first free finger for steering.
 			if not dragging:
 				drag_index = event.index
 				_pointer_down(event.position)
@@ -1713,11 +1896,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		_pointer_move(event.position)
 	elif event is InputEventKey and event.pressed and not event.echo:
 		match event.keycode:
-			KEY_SPACE: trigger_dash()
 			KEY_Q, KEY_TAB: cycle_weapon()
-			KEY_SHIFT: set_boost(true)
-	elif event is InputEventKey and not event.pressed:
-		if event.keycode == KEY_SHIFT: set_boost(false)
 
 func _pointer_down(pos: Vector2) -> void:
 	dragging = true
@@ -1763,22 +1942,18 @@ func _pointer_move(pos: Vector2) -> void:
 			return
 	if total.length() < Data.PLAYER.deadzone: return
 	if control_mode == "direct":
-		player.position += fd
-		player.target = player.position
+		player.target += fd
 	else:
 		player.target += fd
 
 func _pointer_up(_pos: Vector2) -> void:
 	if not dragging: return
-	var elapsed := Time.get_ticks_msec() - tap_start_ms
-	var d := drag_cur - drag_start
-	if elapsed < 200 and d.length() < 14:
-		trigger_dash()
 	dragging = false
 	drag_index = -1
 	joy_active = false
 	joy_dir = Vector2.ZERO
 	joy_mag = 0.0
+	joy_vec = Vector2.ZERO
 
 func show_toast(text: String, variant := "") -> void:
 	hud.toast(text, variant)

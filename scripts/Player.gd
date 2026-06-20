@@ -9,9 +9,6 @@ var bank := 0.0
 var hp := 3
 var max_hp := 3
 var invuln := 0.0
-var dash_timer := 0.0
-var dash_cooldown := 0.0
-var dash_dir: Vector2 = Vector2.ZERO
 var echo_meter := 0.0
 var rewind_charges := 1
 var shield_timer := 0.0
@@ -36,15 +33,11 @@ func _draw() -> void:
 	if invuln > 0 and int(invuln * 20) % 2 == 0:
 		alpha = 0.4
 
-	# Dash flash
-	if dash_timer > 0:
-		draw_circle(Vector2.ZERO, size + 10, Color(Data.CYAN.r, Data.CYAN.g, Data.CYAN.b, 0.3))
-
 	# Station shield bubble
 	if shield_timer > 0:
 		var sp := 0.6 + sin(time * 6.0) * 0.2
-		Neon.glow(self, Vector2.ZERO, size * 2.2, Data.GREEN, 0.18)
-		draw_arc(Vector2.ZERO, size + 8.0, 0, TAU, 40, Color(Data.GREEN.r, Data.GREEN.g, Data.GREEN.b, sp), 2.0)
+		Neon.glow(self, Vector2.ZERO, size * 2.2, Data.CYAN_SOFT, 0.18)
+		draw_arc(Vector2.ZERO, size + 8.0, 0, TAU, 40, Color(Data.CYAN_SOFT.r, Data.CYAN_SOFT.g, Data.CYAN_SOFT.b, sp), 2.0)
 
 	draw_set_transform(Vector2.ZERO, aim_angle + PI / 2 + bank, Vector2.ONE)
 

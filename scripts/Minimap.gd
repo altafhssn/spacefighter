@@ -4,9 +4,13 @@ extends Control
 
 var main = null
 const RANGE := 900.0
+var redraw_timer := 0.0
 
-func _process(_dt: float) -> void:
-	queue_redraw()
+func _process(dt: float) -> void:
+	redraw_timer -= dt
+	if redraw_timer <= 0.0:
+		queue_redraw()
+		redraw_timer = 0.1
 
 func _draw() -> void:
 	if main == null or main.player == null: return

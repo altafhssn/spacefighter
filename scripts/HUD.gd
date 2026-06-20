@@ -49,6 +49,7 @@ var weapon_lbl: Label
 var slots_box: HBoxContainer
 var echo_fill: ColorRect
 var echo_pct_lbl: Label
+var ability_timer_lbl: Label
 var xp_fill: ColorRect
 var xp_lbl: Label
 var rewind_lbl: Label
@@ -75,8 +76,6 @@ var wk_badge: Label
 var toast_lbl: Label
 var wave_intro_lbl: Label
 var announce_lbl: Label
-var boost_btn: Button
-var dash_btn: Button
 var pause_btn: Button
 
 # overlays
@@ -87,6 +86,10 @@ var pause_overlay: Control
 var codex_overlay: Control
 var guide_overlay: Control
 var settings_overlay: Control
+var enemy_intro_overlay: Control
+var enemy_intro_icon_lbl: Label
+var enemy_intro_name_lbl: Label
+var enemy_intro_desc_lbl: Label
 var final_score_lbl: Label
 var final_wave_lbl: Label
 var final_combo_lbl: Label
@@ -115,6 +118,7 @@ var damage_flash: ColorRect
 var rewind_flash: ColorRect
 var death_flash: ColorRect
 var echo_overlay: ColorRect
+var heal_flash: ColorRect
 
 
 # ============================================================
@@ -179,6 +183,7 @@ func build() -> void:
 	echo_overlay = _full_rect(Color(AM.r, AM.g, AM.b, 0.12)); echo_overlay.visible = false
 	add_child(echo_overlay)
 	damage_flash = _full_rect(Color(MG.r, MG.g, MG.b, 0.0)); add_child(damage_flash)
+	heal_flash = _full_rect(Color(GREEN.r, GREEN.g, GREEN.b, 0.0)); add_child(heal_flash)
 	rewind_flash = _full_rect(Color(CY.r, CY.g, CY.b, 0.0)); add_child(rewind_flash)
 	death_flash = _full_rect(Color(1, 1, 1, 0.0)); add_child(death_flash)
 
@@ -208,7 +213,7 @@ func build() -> void:
 	hp_row.add_theme_constant_override("separation", 8)
 	hp_row.position = Vector2(24, 86)
 	gameplay_hud.add_child(hp_row)
-	hp_lbl = _lbl("", f_sym, 22, ERR); hp_row.add_child(hp_lbl)
+	hp_lbl = _lbl("", f_sym, 22, GREEN_BR); hp_row.add_child(hp_lbl)
 	rewind_lbl = _lbl("", f_sym, 18, CY_SOFT); hp_row.add_child(rewind_lbl)
 
 	# ---- top-center: modifier badges + boss bar ----
@@ -224,26 +229,33 @@ func build() -> void:
 	boss_wrap = _passthru(); boss_wrap.visible = false
 	gameplay_hud.add_child(boss_wrap)
 	var boss_panel := PanelContainer.new()
-	boss_panel.position = Vector2(52, 124)
-	boss_panel.size = Vector2(vp.x - 104, 92)
-	boss_panel.add_theme_stylebox_override("panel", UIS.panel_style(UIS.DANGER, 0.9, 16))
+	boss_panel.position = Vector2(36, 118)
+	boss_panel.size = Vector2(vp.x - 72, 118)
+	var boss_style := UIS.panel_style(UIS.DANGER, 0.97, 18)
+	boss_style.set_border_width_all(3)
+	boss_style.border_color = Color(UIS.DANGER, 0.92)
+	boss_panel.add_theme_stylebox_override("panel", boss_style)
 	boss_wrap.add_child(boss_panel)
+	var boss_alert := _ctr(_lbl("⚠  BOSS ENGAGEMENT  ⚠", fv_label, 12, UIS.DANGER))
+	boss_alert.position = Vector2(64, 128)
+	boss_alert.size = Vector2(vp.x - 128, 18)
+	boss_wrap.add_child(boss_alert)
 	var boss_header := HBoxContainer.new()
-	boss_header.position = Vector2(72, 138)
-	boss_header.size = Vector2(vp.x - 144, 28)
+	boss_header.position = Vector2(62, 149)
+	boss_header.size = Vector2(vp.x - 124, 34)
 	boss_header.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	boss_wrap.add_child(boss_header)
-	boss_name_lbl = _lbl("BOSS", fv_title, 20, UIS.TEXT_PRIMARY)
+	boss_name_lbl = _lbl("BOSS", fv_title, 24, UIS.TEXT_PRIMARY)
 	boss_name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	boss_header.add_child(boss_name_lbl)
-	boss_hp_lbl = _r(_lbl("100%", fv_num, 18, UIS.DANGER))
-	boss_hp_lbl.custom_minimum_size = Vector2(88, 0)
+	boss_hp_lbl = _r(_lbl("100 / 100  ·  100%", fv_num, 20, UIS.DANGER))
+	boss_hp_lbl.custom_minimum_size = Vector2(190, 0)
 	boss_header.add_child(boss_hp_lbl)
-	boss_phase_lbl = _lbl("PHASE 1", fv_label, 12, UIS.TEXT_SECONDARY)
-	boss_phase_lbl.position = Vector2(72, 168)
-	boss_phase_lbl.size = Vector2(vp.x - 144, 18)
+	boss_phase_lbl = _lbl("PHASE 1", fv_label, 13, UIS.AMBER)
+	boss_phase_lbl.position = Vector2(64, 184)
+	boss_phase_lbl.size = Vector2(vp.x - 128, 18)
 	boss_wrap.add_child(boss_phase_lbl)
-	boss_fill = _seg_bar(boss_wrap, Vector2(72, 190), Vector2(vp.x - 144, 14), UIS.DANGER, UIS.DANGER)
+	boss_fill = _seg_bar(boss_wrap, Vector2(62, 207), Vector2(vp.x - 124, 20), UIS.DANGER, UIS.DANGER)
 
 	# ---- top-right: WAVE / WEAPON panel + ECHO ----
 	var tr_panel := _panel(CY, 0.5)
@@ -269,12 +281,17 @@ func build() -> void:
 	echo_pct_lbl.position = Vector2(vp.x - 160, 92); echo_pct_lbl.size = Vector2(140, 14)
 	gameplay_hud.add_child(echo_pct_lbl)
 	echo_fill = _seg_bar(gameplay_hud, Vector2(vp.x - 140, 108), Vector2(120, 8), AM, AM)
+	ability_timer_lbl = _ctr(_lbl("", fv_label, 12, AM_SOFT))
+	ability_timer_lbl.position = Vector2(vp.x / 2 - 120, 92)
+	ability_timer_lbl.size = Vector2(240, 18)
+	ability_timer_lbl.visible = false
+	gameplay_hud.add_child(ability_timer_lbl)
 
 	# ---- world mini-boss bar (bottom-center) ----
 	wboss_wrap = _passthru(); wboss_wrap.visible = false
 	gameplay_hud.add_child(wboss_wrap)
-	wboss_name_lbl = _ctr(_lbl("GUARDIAN", fv_label, 13, MG_SOFT))
-	wboss_name_lbl.position = Vector2(vp.x / 2 - 160, vp.y - 92); wboss_name_lbl.size = Vector2(320, 18)
+	wboss_name_lbl = _ctr(_lbl("GUARDIAN", fv_label, 11, MG_SOFT))
+	wboss_name_lbl.position = Vector2(vp.x / 2 - 260, vp.y - 94); wboss_name_lbl.size = Vector2(520, 20)
 	wboss_wrap.add_child(wboss_name_lbl)
 	wboss_fill = _seg_bar(wboss_wrap, Vector2(vp.x / 2 - 150, vp.y - 72), Vector2(300, 7), MG, MG)
 
@@ -301,23 +318,11 @@ func build() -> void:
 	xp_fill = _seg_bar(gameplay_hud, Vector2(20, vp.y - 24), Vector2(vp.x - 40, 6), GREEN_BR, GREEN)
 
 	# ---- bottom-right controls ----
-	boost_btn = _neon_button("BOOST »", CY, 18, Vector2(130, 64))
-	boost_btn.position = Vector2(vp.x - 150, vp.y - 120)
-	boost_btn.button_down.connect(func(): main.set_boost(true))
-	boost_btn.button_up.connect(func(): main.set_boost(false))
-	gameplay_hud.add_child(boost_btn)
-
-	swap_btn = _neon_button("⟳", MG, 22, Vector2(56, 56))
+	swap_btn = _neon_button("⟳", MG, 22, Vector2(60, 60))
 	swap_btn.add_theme_font_override("font", f_sym)
-	swap_btn.position = Vector2(vp.x - 150 - 64, vp.y - 112)
+	swap_btn.position = Vector2(vp.x - 80, vp.y - 120)
 	swap_btn.pressed.connect(func(): main.cycle_weapon())
 	gameplay_hud.add_child(swap_btn)
-
-	# DASH button — above BOOST, so the steering finger never has to let go
-	dash_btn = _neon_button("DASH", CY, 16, Vector2(130, 50))
-	dash_btn.position = Vector2(vp.x - 150, vp.y - 190)
-	dash_btn.pressed.connect(func(): main.trigger_dash())
-	gameplay_hud.add_child(dash_btn)
 
 	# Pause sits above the action controls: reachable, but away from steering.
 	pause_btn = _premium_button("Ⅱ", TXT_DIM, 16, Vector2(48, 48))
@@ -365,6 +370,7 @@ func build() -> void:
 	_build_codex()
 	_build_guide()
 	_build_settings()
+	_build_enemy_intro()
 	gameplay_hud.visible = false
 
 
@@ -812,21 +818,20 @@ func _build_guide() -> void:
 	var pair := _overlay(0.96)
 	guide_overlay = pair[0]; guide_overlay.visible = false
 	var v: VBoxContainer = pair[1]
-	v.add_child(_ctr(_glow("PILOT GUIDE", fv_display, 40, MG_SOFT)))
-	v.add_child(_ctr(_lbl("MOVE WELL. LET THE WEAPONS WORK.", fv_label, 11, OUTLINE)))
+	v.add_child(_ctr(_glow("PILOT GUIDE", fv_display, 44, MG_SOFT)))
+	v.add_child(_ctr(_lbl("MOVE WELL. LET THE WEAPONS WORK.", fv_label, 14, OUTLINE)))
 	var panel := _panel(MG_SOFT, 0.62)
 	panel.custom_minimum_size = Vector2(600, 0)
 	panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	var list := VBoxContainer.new(); list.add_theme_constant_override("separation", 12)
+	var list := VBoxContainer.new(); list.add_theme_constant_override("separation", 16)
 	panel.add_child(list)
 	list.add_child(_guide_row("STEER", "Drag or use the floating joystick. Weapons auto-target nearby threats.", CY))
-	list.add_child(_guide_row("DASH", "Tap or press DASH to cross bullets with brief invulnerability.", CY))
-	list.add_child(_guide_row("BOOST", "Hold BOOST to trade Echo energy for escape speed.", AM))
 	list.add_child(_guide_row("BUILD", "Collect XP, install up to 4 weapons and 4 passives, then evolve matched pairs.", GREEN_BR))
 	list.add_child(_guide_row("FOCUS", "The swap button only changes the HUD focus. All installed weapons fire together.", MG_SOFT))
-	list.add_child(_guide_row("LANDMARKS", "Caches, stations, ruins and beacons are world objectives—not enemies.", Data.PURPLE))
+	list.add_child(_guide_row("BEACON", "A cyan world landmark. Claim it to expand radar range by 50% for 60 seconds.", CY))
+	list.add_child(_guide_row("LANDMARKS", "Caches, healing stations, ruins and beacons are world objectives—not enemies.", Data.PURPLE))
 	v.add_child(panel)
-	v.add_child(_ctr(_lbl("CONTROL MODE", fv_label, 10, OUTLINE)))
+	v.add_child(_ctr(_lbl("CONTROL MODE", fv_label, 14, OUTLINE)))
 	var modes := HBoxContainer.new(); modes.alignment = BoxContainer.ALIGNMENT_CENTER
 	modes.add_theme_constant_override("separation", 8)
 	for mode_data in [["JOYSTICK", "joystick"], ["FOLLOW", "follow"], ["DIRECT", "direct"]]:
@@ -840,10 +845,71 @@ func _build_guide() -> void:
 	back.pressed.connect(func(): close_modal())
 	v.add_child(back)
 
+func _build_enemy_intro() -> void:
+	enemy_intro_overlay = Control.new()
+	enemy_intro_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	enemy_intro_overlay.visible = false
+	add_child(enemy_intro_overlay)
+
+	var back_buffer := BackBufferCopy.new()
+	back_buffer.copy_mode = BackBufferCopy.COPY_MODE_VIEWPORT
+	enemy_intro_overlay.add_child(back_buffer)
+	var blur := ColorRect.new()
+	blur.set_anchors_preset(Control.PRESET_FULL_RECT)
+	blur.mouse_filter = Control.MOUSE_FILTER_STOP
+	var blur_shader := Shader.new()
+	blur_shader.code = """
+shader_type canvas_item;
+uniform sampler2D screen_texture : hint_screen_texture, filter_linear_mipmap;
+void fragment() {
+	vec2 px = 1.0 / vec2(textureSize(screen_texture, 0));
+	vec4 col = texture(screen_texture, SCREEN_UV) * 0.24;
+	col += texture(screen_texture, SCREEN_UV + px * vec2(5.0, 0.0)) * 0.12;
+	col += texture(screen_texture, SCREEN_UV - px * vec2(5.0, 0.0)) * 0.12;
+	col += texture(screen_texture, SCREEN_UV + px * vec2(0.0, 5.0)) * 0.12;
+	col += texture(screen_texture, SCREEN_UV - px * vec2(0.0, 5.0)) * 0.12;
+	col += texture(screen_texture, SCREEN_UV + px * vec2(3.5, 3.5)) * 0.07;
+	col += texture(screen_texture, SCREEN_UV + px * vec2(-3.5, 3.5)) * 0.07;
+	col += texture(screen_texture, SCREEN_UV + px * vec2(3.5, -3.5)) * 0.07;
+	col += texture(screen_texture, SCREEN_UV - px * vec2(3.5, 3.5)) * 0.07;
+	COLOR = mix(col, vec4(0.015, 0.025, 0.07, 1.0), 0.48);
+}
+"""
+	var blur_material := ShaderMaterial.new()
+	blur_material.shader = blur_shader
+	blur.material = blur_material
+	enemy_intro_overlay.add_child(blur)
+
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	enemy_intro_overlay.add_child(center)
+	var card := _premium_box(CY, 0.96, 20)
+	card.custom_minimum_size = Vector2(minf(500.0, _vp().x - 72.0), 390)
+	center.add_child(card)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 10)
+	card.add_child(v)
+	v.add_child(_ctr(_lbl("NEW HOSTILE", fv_label, 12, UIS.DANGER)))
+	enemy_intro_icon_lbl = _ctr(_glow("◆", f_sym, 48, CY))
+	enemy_intro_icon_lbl.custom_minimum_size.y = 58
+	v.add_child(enemy_intro_icon_lbl)
+	enemy_intro_name_lbl = _ctr(_glow("ENEMY", fv_display, 32, TXT))
+	v.add_child(enemy_intro_name_lbl)
+	enemy_intro_desc_lbl = _ctr(_lbl("", fv_body, 14, TXT))
+	enemy_intro_desc_lbl.custom_minimum_size = Vector2(420, 82)
+	enemy_intro_desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	enemy_intro_desc_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	v.add_child(enemy_intro_desc_lbl)
+	var continue_btn := _premium_button("CONTINUE  ▶", GREEN_BR, 16, Vector2(230, 58), true)
+	continue_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	continue_btn.pressed.connect(func(): main.dismiss_enemy_intro())
+	v.add_child(continue_btn)
+
 func _guide_row(title: String, body: String, accent: Color) -> Control:
 	var row := HBoxContainer.new(); row.add_theme_constant_override("separation", 14)
-	var tag := _lbl(title, fv_label, 12, accent); tag.custom_minimum_size = Vector2(105, 0)
-	var text := _lbl(body, fv_body, 11, TXT_DIM)
+	var tag := _lbl(title, fv_label, 15, accent); tag.custom_minimum_size = Vector2(120, 0)
+	var text := _lbl(body, fv_body, 14, TXT_DIM)
 	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(tag); row.add_child(text)
@@ -1099,15 +1165,20 @@ func refresh() -> void:
 	var ep: float = main.player.echo_meter / Data.ECHO.meter_max
 	echo_fill.size.x = echo_fill.get_meta("w") * clamp(ep, 0.0, 1.0)
 	echo_pct_lbl.text = "ECHO %d%%" % int(ep * 100)
+	ability_timer_lbl.visible = main.test_ability_timer > 0.0
+	if ability_timer_lbl.visible:
+		ability_timer_lbl.text = "TEST ABILITIES  %02ds" % ceili(main.test_ability_timer)
 	if main.boss and boss_wrap.visible:
 		var boss_ratio: float = clamp(main.boss.hp / main.boss.max_hp, 0.0, 1.0)
 		boss_fill.size.x = boss_fill.get_meta("w") * boss_ratio
-		boss_hp_lbl.text = "%d%%" % ceili(boss_ratio * 100.0)
+		boss_hp_lbl.text = "%d / %d  ·  %d%%" % [
+			maxi(0, ceili(main.boss.hp)), ceili(main.boss.max_hp), ceili(boss_ratio * 100.0)]
 		boss_phase_lbl.text = "PHASE %d" % maxi(1, int(main.boss.phase))
+		boss_fill.color = UIS.DANGER if boss_ratio > 0.35 else UIS.AMBER
+		boss_hp_lbl.add_theme_color_override("font_color", boss_fill.color)
+		boss_wrap.modulate.a = 0.94 + sin(main.time * 4.0) * 0.06
 	if main.world_boss and wboss_wrap.visible:
 		wboss_fill.size.x = wboss_fill.get_meta("w") * clamp(main.world_boss.hp / main.world_boss.max_hp, 0.0, 1.0)
-	boost_btn.disabled = main.player.echo_meter < Data.BOOST.min_echo_to_start
-	dash_btn.disabled = main.player.dash_cooldown > 0.0
 	world_pos_lbl.text = "X %d · Y %d" % [round(main.player.position.x), round(main.player.position.y)]
 	mod_badge.text = main.modifier_badge
 	wk_badge.text = main.weekly_badge
@@ -1139,19 +1210,28 @@ func update_weapon() -> void:
 func show_wave_intro(n: int) -> void:
 	wave_lbl.text = "WAVE %d" % n
 	wave_intro_lbl.text = "WAVE %d" % n
+	wave_intro_lbl.add_theme_color_override("font_color", TXT)
 	var tw := create_tween()
 	wave_intro_lbl.modulate.a = 0.0
 	tw.tween_property(wave_intro_lbl, "modulate:a", 1.0, 0.3)
 	tw.tween_interval(0.8)
 	tw.tween_property(wave_intro_lbl, "modulate:a", 0.0, 0.5)
 
+func show_launch_countdown(text: String) -> void:
+	wave_intro_lbl.visible = true
+	wave_intro_lbl.text = text
+	wave_intro_lbl.modulate.a = 1.0
+	wave_intro_lbl.add_theme_color_override("font_color", GREEN_BR if text == "LAUNCH" else TXT)
+
 func show_boss_bar(n: String) -> void:
 	boss_name_lbl.text = n
 	boss_phase_lbl.text = "INCOMING"
 	boss_hp_lbl.text = "100%"
 	boss_fill.size.x = boss_fill.get_meta("w")
+	boss_fill.color = UIS.DANGER
+	boss_wrap.modulate.a = 1.0
 	boss_wrap.visible = true
-	pause_btn.position.y = 224
+	pause_btn.position.y = 250
 
 func hide_boss_bar() -> void:
 	boss_wrap.visible = false
@@ -1181,6 +1261,16 @@ func toast(text: String, _variant := "") -> void:
 	tw.tween_interval(1.2)
 	tw.tween_property(toast_lbl, "modulate:a", 0.0, 0.6)
 
+func show_enemy_intro(enemy_name: String, icon: String, description: String, color: Color) -> void:
+	enemy_intro_name_lbl.text = enemy_name
+	enemy_intro_icon_lbl.text = icon
+	enemy_intro_icon_lbl.add_theme_color_override("font_color", color)
+	enemy_intro_desc_lbl.text = description
+	enemy_intro_overlay.visible = true
+
+func hide_enemy_intro() -> void:
+	enemy_intro_overlay.visible = false
+
 # Big centered warning banner shown ~1.3s before something new spawns.
 func announce(text: String, col: Color) -> void:
 	announce_lbl.text = text
@@ -1205,5 +1295,6 @@ func _flash(rect: ColorRect, peak: float, dur: float) -> void:
 	tw.tween_property(rect, "color:a", 0.0, dur * 0.7)
 
 func flash_damage() -> void: _flash(damage_flash, 0.4, 0.3)
+func flash_heal() -> void: _flash(heal_flash, 0.28, 0.55)
 func flash_rewind() -> void: _flash(rewind_flash, 0.6, 0.7)
 func flash_death() -> void: _flash(death_flash, 0.9, 0.6)

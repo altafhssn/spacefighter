@@ -31,6 +31,9 @@ var drift_angle := 0.0
 var state := ""
 var aim_time := 0.9
 var dive_speed := 400.0
+var dive_target: Vector2 = Vector2.ZERO
+var dive_timer := 0.0
+var recover_timer := 0.0
 var shield_hp := 0.0
 var shield_angle := -PI / 2
 var shield_open := false
@@ -43,6 +46,10 @@ var spiral_center: Vector2 = Vector2.ZERO
 var snipe_target: Vector2 = Vector2.ZERO
 var snipe_target_ready := false
 var snipe_side := 0.0
+var weave_phase := 0.0
+var orbit_dir := 1.0
+var preferred_range := 210.0
+var redraw_timer := 0.0
 
 func update(dt: float) -> void:
 	age += dt
@@ -63,20 +70,50 @@ func update(dt: float) -> void:
 			var ang := (p - position).angle()
 			var wobble := sin(drift_angle) * 0.6
 			vel = Vector2(cos(ang + wobble), sin(ang + wobble)) * speed
+		"weave":
+			weave_phase += dt * 5.5
+			var toward := (p - position).normalized()
+			var lateral := toward.rotated(PI / 2.0) * sin(weave_phase) * speed * 0.9
+			vel = toward * speed + lateral
+		"strafe":
+			var offset := position - p
+			var distance := maxf(1.0, offset.length())
+			var radial := offset / distance
+			var tangent := radial.rotated(PI / 2.0) * orbit_dir
+			var range_error := clampf((distance - preferred_range) / preferred_range, -1.0, 1.0)
+			vel = tangent * speed - radial * range_error * speed * 0.9
+			fire_timer -= dt
+			if fire_timer <= 0.0 and distance < preferred_range * 1.45:
+				var shot_angle := (p - position).angle()
+				main.spawn_enemy_bullet(position, Vector2.from_angle(shot_angle) * 260.0, 3.5, color, 1, 3.0)
+				fire_timer = randf_range(2.2, 3.0)
 		"dive":
 			if state == "aiming":
 				aim_time -= dt
 				telegraph = max(0.0, 0.9 - aim_time)
 				var ang := (p - position).angle()
-				vel = Vector2(cos(ang), sin(ang)) * 30.0
+				vel = Vector2(cos(ang), sin(ang)) * 55.0
 				if aim_time <= 0:
 					state = "diving"
-					var da := (p - position).angle()
-					vel = Vector2(cos(da), sin(da)) * dive_speed
+					dive_target = p + main.player.vel * 0.22
+					vel = (dive_target - position).normalized() * dive_speed
+					dive_timer = clampf(position.distance_to(dive_target) / dive_speed + 0.12, 0.35, 1.15)
 					telegraph = 0.0
 			elif state == "diving":
-				if position.distance_to(p) > Data.CULL_DISTANCE:
-					remove = true
+				dive_timer -= dt
+				if dive_timer <= 0.0 or position.distance_to(dive_target) < 18.0:
+					state = "recovering"
+					recover_timer = 0.55
+			elif state == "recovering":
+				recover_timer -= dt
+				var away := (position - p).normalized()
+				var tangent := away.rotated(PI / 2.0)
+				vel = vel.lerp((away * 0.45 + tangent * 0.55).normalized() * speed * 1.4,
+					1.0 - exp(-5.0 * dt))
+				if recover_timer <= 0.0:
+					state = "aiming"
+					aim_time = randf_range(0.75, 1.05)
+					telegraph = 0.0
 		"shield":
 			var ang := (p - position).angle()
 			shield_cycle += dt
@@ -125,9 +162,9 @@ func update(dt: float) -> void:
 			return
 
 	# separation — push apart from nearby pursuers so swarms don't stack
-	if behavior == "drift" or behavior == "shield":
+	if behavior in ["drift", "weave", "strafe", "shield"]:
 		var sep := Vector2.ZERO
-		for o in main.enemies:
+		for o in main.nearby_enemies(position):
 			if o == self: continue
 			var off: Vector2 = position - o.position
 			var dsq := off.length_squared()
@@ -144,12 +181,15 @@ func update(dt: float) -> void:
 	var dp := position.distance_to(p)
 	var leash: float = main.view_size.length() * 0.9
 	match behavior:
-		"drift", "shield", "snipe":
+		"drift", "weave", "strafe", "shield", "snipe":
 			if dp > leash: _reengage(p)
 		"dive":
 			if state == "aiming" and dp > leash: _reengage(p)
-			elif state == "diving" and dp > Data.CULL_DISTANCE: remove = true
-	queue_redraw()
+			elif state in ["diving", "recovering"] and dp > Data.CULL_DISTANCE: _reengage(p)
+	redraw_timer -= dt
+	if redraw_timer <= 0.0 or hit_flash > 0.0 or telegraph > 0.0:
+		queue_redraw()
+		redraw_timer = 1.0 / 30.0
 
 func _reengage(p: Vector2) -> void:
 	var ang := randf() * TAU
@@ -157,6 +197,8 @@ func _reengage(p: Vector2) -> void:
 	if behavior == "snipe":
 		state = "positioning"; fire_timer = 0.0; telegraph = 0.0
 		snipe_target_ready = false
+	elif behavior == "strafe":
+		fire_timer = randf_range(0.8, 1.8)
 	elif behavior == "dive":
 		state = "aiming"; aim_time = 0.9; telegraph = 0.0
 
@@ -193,6 +235,24 @@ func _draw() -> void:
 				pts.append(Vector2(cos(a), sin(a)) * size)
 			Neon.poly(self, pts, body_color, color, 1.5)
 			draw_circle(Vector2.ZERO, 2.5, Data.WHITE)
+		"weaver":
+			var ang: float = vel.angle()
+			draw_set_transform(Vector2.ZERO, ang + PI / 2.0, Vector2.ONE)
+			var pts := PackedVector2Array([
+				Vector2(0, -size), Vector2(size * 0.7, size * 0.65),
+				Vector2(0, size * 0.25), Vector2(-size * 0.7, size * 0.65)])
+			Neon.poly(self, pts, body_color, color, 1.3)
+			draw_circle(Vector2(0, -size * 0.25), 1.5, Data.WHITE)
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		"skimmer":
+			var ang: float = vel.angle()
+			draw_set_transform(Vector2.ZERO, ang, Vector2.ONE)
+			var pts := PackedVector2Array([
+				Vector2(size, 0), Vector2(-size * 0.65, -size * 0.7),
+				Vector2(-size * 0.25, 0), Vector2(-size * 0.65, size * 0.7)])
+			Neon.poly(self, pts, body_color, color, 1.4)
+			draw_line(Vector2(-size * 0.2, 0), Vector2(size * 0.55, 0), Data.WHITE, 1.2)
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		"diver":
 			var ang: float = (main.player.position - position).angle()
 			draw_set_transform(Vector2.ZERO, ang + PI / 2, Vector2.ONE)
@@ -201,6 +261,10 @@ func _draw() -> void:
 				Vector2(0, size * 0.4), Vector2(-size * 0.85, size * 0.7)])
 			Neon.poly(self, pts, body_color, color, 1.5)
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+			if state == "aiming":
+				var target_local: Vector2 = main.player.position - position
+				draw_line(Vector2.ZERO, target_local, Color(color, 0.18 + telegraph * 0.42), 1.5)
+				draw_circle(target_local, 5.0 + telegraph * 4.0, Color(color, 0.28), false, 1.5)
 		"bulwark":
 			draw_rect(Rect2(-size, -size, size * 2, size * 2), body_color)
 			draw_rect(Rect2(-size, -size, size * 2, size * 2), color, false, 1.5)

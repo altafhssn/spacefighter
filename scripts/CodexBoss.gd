@@ -180,7 +180,7 @@ func _update_bomber(dt: float) -> void:
 	if position.distance_to(main.player.position) <= 60.0 or state_timer <= 0.0:
 		exploding = true
 		detonation_timer = 0.5
-		main.show_toast("DETONATION — DASH!")
+		main.show_toast("DETONATION — CLEAR THE BLAST!")
 
 func _aimed_fan(count: int, bullet_speed: float, spread: float) -> void:
 	var a: float = (main.player.position - position).angle()

@@ -48,6 +48,9 @@ var singularity_activated := false
 var singularity_radius := 120.0
 var singularity_duration := 1.5
 var singularity_pull := 200.0
+var is_gravity_mine := false
+var mine_arm_time := 0.0
+var mine_arm_total := 0.0
 
 func _draw() -> void:
 	if is_ring:
@@ -58,7 +61,19 @@ func _draw() -> void:
 		var pulse := 1.0 + sin(main_time() * 8.0) * 0.15
 		Neon.glow(self, Vector2.ZERO, singularity_radius * pulse, Data.PURPLE, 0.25)
 		draw_arc(Vector2.ZERO, singularity_radius, 0, TAU, 48, Color(Data.PURPLE.r, Data.PURPLE.g, Data.PURPLE.b, 0.5), 2.0)
+		for i in 3:
+			var a := -main_time() * (1.8 + i * 0.35) + float(i) * TAU / 3.0
+			var orbit := singularity_radius * (0.28 + i * 0.12)
+			draw_circle(Vector2.from_angle(a) * orbit, 2.5, Color(Data.PURPLE, 0.85))
 		draw_circle(Vector2.ZERO, 6.0 * pulse, Data.WHITE)
+		return
+	if is_gravity_mine:
+		var arm_ratio := 1.0 - mine_arm_time / maxf(0.01, mine_arm_total)
+		var pulse := 0.85 + sin(main_time() * 18.0) * 0.15
+		Neon.glow(self, Vector2.ZERO, 18.0 + arm_ratio * 10.0, Data.PURPLE, 0.28)
+		draw_arc(Vector2.ZERO, 14.0 + arm_ratio * 8.0, -PI / 2.0,
+			-PI / 2.0 + TAU * arm_ratio, 28, Color(Data.PURPLE, 0.9), 2.5, true)
+		draw_circle(Vector2.ZERO, 5.0 * pulse, Data.WHITE)
 		return
 
 	# Trail (world coords → local)

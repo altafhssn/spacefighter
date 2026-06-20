@@ -31,9 +31,6 @@ const PLAYER := {
 	"fire_rate": 4.0,
 	"bullet_speed": 720.0,
 	"bullet_damage": 6.0,
-	"dash_distance": 95.0,
-	"dash_duration": 0.16,
-	"dash_cooldown": 2.6,
 	"iframe_duration": 0.5,
 	"deadzone": 8.0,
 	"bank_smoothing": 0.12,
@@ -58,7 +55,9 @@ const ECHO := {
 # ------------------------------------------------------------
 const ENEMY_BASE := {
 	"drone":   {"hp": 18.0, "size": 10.0, "speed": 65.0, "score": 50,  "color": CYAN,    "xp": 1},
-	"diver":   {"hp": 30.0, "size": 12.0, "speed": 0.0,  "score": 80,  "color": MAGENTA, "xp": 2},
+	"weaver":  {"hp": 14.0, "size": 7.0,  "speed": 105.0,"score": 60,  "color": CYAN_SOFT,"xp": 1},
+	"skimmer": {"hp": 22.0, "size": 9.0,  "speed": 92.0, "score": 85,  "color": PURPLE,  "xp": 2},
+	"diver":   {"hp": 30.0, "size": 12.0, "speed": 110.0,"score": 80,  "color": MAGENTA, "xp": 2},
 	"bulwark": {"hp": 90.0, "size": 16.0, "speed": 35.0, "score": 150, "color": AMBER,   "xp": 3, "shield_hp": 50.0},
 	"lancer":  {"hp": 45.0, "size": 14.0, "speed": 0.0,  "score": 120, "color": GOLD,    "xp": 2},
 }
@@ -152,7 +151,7 @@ const SURVIVOR_WEAPONS := {
 		"radius": [30.0, 35.0, 40.0, 45.0, 50.0],
 	},
 	"shield": {
-		"name": "SHIELD SATELLITE", "icon": "◐", "color": GREEN, "archetype": "orbit",
+		"name": "SHIELD SATELLITE", "icon": "◐", "color": CYAN_SOFT, "archetype": "orbit",
 		"evolution": "aegis", "passive": "barrier_generator",
 		"damage": [3.0, 4.0, 5.0, 6.5, 8.0],
 		"rate": [1.5, 1.7, 2.0, 2.2, 2.5],
@@ -210,7 +209,6 @@ const UPGRADES := [
 	{"id": "pierce",      "icon": "⟶", "name": "PIERCE",         "desc": "Bullets pierce +1 enemy",       "rarity": "rare"},
 	{"id": "bulletspeed", "icon": "➤", "name": "BULLET SPEED",   "desc": "+30% bullet speed",             "rarity": "common"},
 	{"id": "maxhp",       "icon": "♥", "name": "MAX HP +1",      "desc": "Permanent +1 max HP, full heal","rarity": "common"},
-	{"id": "dashcd",      "icon": "◈", "name": "DASH COOLDOWN",  "desc": "-25% dash cooldown",            "rarity": "common"},
 	{"id": "echogain",    "icon": "◊", "name": "ECHO GAIN",      "desc": "+50% Echo meter gain",          "rarity": "common"},
 	{"id": "critchance",  "icon": "✸", "name": "CRIT CHANCE",    "desc": "+15% crit chance (3x dmg)",     "rarity": "rare"},
 	{"id": "magnet",      "icon": "◐", "name": "MAGNET FIELD",   "desc": "+40% pickup magnet radius",     "rarity": "common"},
@@ -218,8 +216,6 @@ const UPGRADES := [
 	{"id": "rewind",      "icon": "↺", "name": "REWIND +1",      "desc": "+1 Echo Rewind charge",         "rarity": "rare"},
 	{"id": "echoduration","icon": "◷", "name": "ECHO EXTEND",    "desc": "+1.5s Echo Phase duration",     "rarity": "common"},
 	{"id": "lifesteal",   "icon": "✚", "name": "LIFESTEAL",      "desc": "5% chance to heal on kill",     "rarity": "rare"},
-	{"id": "effboost",    "icon": "»", "name": "EFFICIENT BOOST","desc": "-20% boost Echo drain",         "rarity": "common"},
-	{"id": "overdrive",   "icon": "⚡", "name": "OVERDRIVE",      "desc": "+30% boost speed",              "rarity": "rare"},
 ]
 
 const UPGRADE_MAX_STACKS := {
@@ -229,7 +225,6 @@ const UPGRADE_MAX_STACKS := {
 	"pierce": 5,
 	"bulletspeed": 4,
 	"maxhp": 5,
-	"dashcd": 3,
 	"echogain": 4,
 	"critchance": 4,
 	"magnet": 4,
@@ -237,8 +232,6 @@ const UPGRADE_MAX_STACKS := {
 	"rewind": 3,
 	"echoduration": 3,
 	"lifesteal": 4,
-	"effboost": 4,
-	"overdrive": 3,
 }
 
 # ------------------------------------------------------------
@@ -248,22 +241,15 @@ const LANDMARK_GRID := 900.0
 
 const LANDMARK_TYPES := {
 	"cache":   {"icon": "⬡", "name": "CACHE",           "color": AMBER,  "effect": "FREE UPGRADE",          "radius": 50.0},
-	"station": {"icon": "✚", "name": "HEALING STATION", "color": GREEN,  "effect": "FULL HEAL + ECHO",      "radius": 55.0},
+	"station": {"icon": "✚", "name": "HEALING STATION", "color": CYAN_SOFT,"effect": "FULL HEAL + ECHO",    "radius": 55.0},
 	"ruins":   {"icon": "◬", "name": "XP RUINS",        "color": PURPLE, "effect": "2x XP FOR 30s",         "radius": 60.0},
-	"beacon":  {"icon": "◉", "name": "BEACON",          "color": CYAN,   "effect": "RADAR EXPANDED 60s",    "radius": 50.0},
+	"beacon":  {"icon": "◉", "name": "BEACON",          "color": CYAN,   "effect": "RADAR RANGE +50% FOR 60s","radius": 50.0},
 }
 
 const MINI_BOSS_TYPES := {
 	"warden":  {"name": "WARDEN",  "hp": 400.0, "size": 32.0, "speed": 50.0,  "color": MAGENTA_SOFT, "score": 2000, "xp": 15, "behavior": "chase"},
 	"stalker": {"name": "STALKER", "hp": 250.0, "size": 26.0, "speed": 130.0, "color": MAGENTA,      "score": 1500, "xp": 12, "behavior": "chase_fast"},
 	"sentry":  {"name": "SENTRY",  "hp": 300.0, "size": 30.0, "speed": 30.0,  "color": GOLD,         "score": 1800, "xp": 14, "behavior": "ranged"},
-}
-
-# Boost system
-const BOOST := {
-	"mult": 1.8,
-	"drain_rate": 25.0,
-	"min_echo_to_start": 5.0,
 }
 
 # XP curve
@@ -278,7 +264,7 @@ const DAILY_MODIFIERS := {
 	"cache":   {"icon": "⬡", "name": "CACHE DAY",   "desc": "Caches give 2 upgrades instead of 1",   "color": AMBER},
 	"beacon":  {"icon": "◉", "name": "BEACON DAY",  "desc": "Beacons last 2x longer (120s)",          "color": CYAN},
 	"ruins":   {"icon": "◬", "name": "RUINS DAY",   "desc": "XP Ruins give 3x XP (instead of 2x)",    "color": PURPLE},
-	"station": {"icon": "✚", "name": "STATION DAY", "desc": "Stations also grant a temporary shield", "color": GREEN},
+	"station": {"icon": "✚", "name": "STATION DAY", "desc": "Stations also grant a temporary shield", "color": CYAN_SOFT},
 	"hunt":    {"icon": "✦", "name": "HUNT DAY",    "desc": "Elites spawn 2x as often, drop 2x XP",   "color": MAGENTA},
 }
 
@@ -287,5 +273,5 @@ const WEEKLY_MODIFIERS := {
 	"elite":    {"icon": "▲", "name": "ELITE WEEK",    "desc": "All enemies +50% HP, +50% XP",         "color": AMBER},
 	"speed":    {"icon": "⚡", "name": "SPEED WEEK",    "desc": "Player +20% speed, enemies +15% speed","color": CYAN},
 	"greed":    {"icon": "$", "name": "GREED WEEK",    "desc": "2x score, but -1 max HP",              "color": AMBER},
-	"explorer": {"icon": "◈", "name": "EXPLORER WEEK", "desc": "Landmarks 50% more common, boost drain halved", "color": GREEN},
+	"explorer": {"icon": "◈", "name": "EXPLORER WEEK", "desc": "Landmarks are 50% more common",           "color": PURPLE},
 }

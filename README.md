@@ -18,37 +18,37 @@ Open the folder in Godot 4.6+ and press **F5**, or from the command line:
 | Input | Action |
 |-------|--------|
 | Drag (mouse/touch) | Move ship |
-| Quick tap | Dash (i-frames) |
 | Swipe up **or** `Q` / `Tab` | Cycle focused weapon HUD slot |
-| Hold **» BOOST** button **or** `Shift` | Boost (drains Echo) |
-| `Space` | Dash |
 
 Pick **FOLLOW** or **DIRECT** control on the start screen.
 
 ## What's implemented (faithful to the prototype)
 
 - **World-space camera** that follows the player with smoothing, screen shake and a zoom-pulse on hits.
-- **Movement**: follow/direct modes, velocity smoothing, banking, engine trail, dash with i-frames.
+- **Movement**: follow/direct modes, velocity smoothing, banking, and engine trail.
 - **8-weapon Survivor loadout** — Pulse Laser, Plasma Cannon, Nova Blast,
   Drone Swarm, Gravity Mine, Missile Pod, Shield Satellite, and Rail Driver.
   Up to four equipped weapons auto-fire simultaneously.
-- **4 enemy types** with their behaviors — Drone (drift), Diver (aim→dive), Bulwark (directional shield), Lancer (reposition→charge→beam) — plus spawn-protection and HP scaling by wave.
+- **6 enemy types** with distinct movement and combat roles, one-time pausing introduction cards, and spawn-protection/HP scaling by wave.
 - **Survivor.io-style waves**: random / circle / line / vortex / cross spawn patterns scaling with wave number.
 - **XP gems → level-ups** with weapon/passive unlocks, five item levels,
   guaranteed evolution cards, four weapon slots, and four passive slots.
+- **Test ability timer**: acquired build changes share a visible 30-second
+  trial window before the run returns to its default Pulse loadout.
 - **Echo systems**: Echo meter, Echo Phase (slow-mo + 2× score), and Echo Rewind on lethal hit.
 - **Combo system** with crit hits, hit-pause and lifesteal.
-- **Boost** (Echo-draining speed burst) with the Overdrive / Efficient-Boost upgrades.
 - **Seven rotating major bosses** — The Conductor, The Spiral, The Warden,
   The Stalker, The Sentry, The Summoner, and The Bomber — with Codex HP
   scaling, phase mechanics, and a shared boss director. Eight additional Codex
   encounters are registered for later mechanic batches.
 - **Elite enemies** every 30s and a timed boss every 60s.
 - **Daily + weekly modifiers** (deterministic by date) with their gameplay effects (swarm/elite/speed/greed/explorer, hunt-day elites, etc.), shown as badges in-game and as pills on the start screen.
-- **Procedural audio**: synthesized SFX (shoot/hit/kill/dash/damage/echo/boss/pickup/rewind…) and adaptive bass+arp music that scales with your combo — same design as the WebAudio original.
+- **Procedural audio**: synthesized SFX (shoot/hit/kill/damage/echo/boss/pickup/rewind…) and adaptive bass+arp music that scales with your combo — same design as the WebAudio original.
 - **Radar minimap** (enemy/boss blips), **world-position readout**, and **high-score persistence** (`user://aetherwing.save`).
 - **FX**: smooth radial-gradient neon glow, particles, scorch decals, floating damage numbers, parallax starfield + world grid, additive bloom.
+- **Mobile performance controls**: spatial enemy separation, throttled decorative redraws, and bounded particles/projectiles/pickups for stable long runs.
 - **HUD + overlays**: score/combo/HP/wave/weapon/echo/XP, boss bar, toasts, wave intro, start / game-over / level-up screens.
+- **Boss arenas**: enlarged combat space with randomly appearing repair pickups and clear cyan healing feedback.
 
 ## Project layout
 
@@ -73,7 +73,8 @@ scripts/
 - **World landmarks** (cache / healing station / XP ruins / beacon) spawned on a
   deterministic 900-unit grid as you roam, with discovery, claim effects, daily-
   modifier interactions (Cache Day double upgrade, Station Day shield, Ruins Day
-  3× XP, Beacon Day 120s), and an expanded-radar beacon buff.
+  3× XP, Beacon Day 120s), and a Beacon buff that expands radar range by 50%.
+  Guarded landmarks explicitly name the guardian required to unlock them.
 - **World mini-bosses** (Warden / Stalker / Sentry — chase / fast-zigzag / ranged)
   that guard ~25% of landmarks; defeat one to auto-claim the landmark. Own health
   bar, radar blip, and spawn protection.
@@ -81,7 +82,7 @@ scripts/
 ## Mobile
 
 The project targets the **Mobile renderer** and is built portrait-first with
-touch input (drag move, tap dash, swipe-up weapon swap, on-screen boost button),
+touch input (drag movement and swipe-up weapon swapping),
 so the gameplay is mobile-appropriate. To actually ship to a device you still
 need to: install the Android/iOS export templates, set up an export preset (and
 Android SDK + JDK), and ideally handle safe-area insets so the HUD clears the

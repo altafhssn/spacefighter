@@ -6,6 +6,7 @@ var main = null
 var nebulae: Array = []
 var layers: Array = []          # 3 parallax layers of stars
 const DEPTHS := [0.3, 0.5, 0.8]
+var redraw_timer := 0.0
 
 func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -18,7 +19,7 @@ func _generate() -> void:
 	var w: float = max(vp.x, 1.0)
 	var h: float = max(vp.y, 1.0)
 	nebulae.clear()
-	for i in 6:
+	for i in 3:
 		nebulae.append({
 			"pos": Vector2(randf() * w, randf() * h),
 			"r": 120.0 + randf() * 220.0,
@@ -27,7 +28,7 @@ func _generate() -> void:
 	layers.clear()
 	for d in DEPTHS.size():
 		var stars: Array = []
-		var n := int(70 / (d + 1)) + 30
+		var n := int(42 / (d + 1)) + 20
 		for i in n:
 			stars.append({
 				"pos": Vector2(randf() * w, randf() * h),
@@ -36,8 +37,11 @@ func _generate() -> void:
 			})
 		layers.append(stars)
 
-func _process(_dt: float) -> void:
-	queue_redraw()
+func _process(dt: float) -> void:
+	redraw_timer -= dt
+	if redraw_timer <= 0.0:
+		queue_redraw()
+		redraw_timer = 1.0 / 24.0
 
 func _draw() -> void:
 	var vp := get_viewport_rect().size
